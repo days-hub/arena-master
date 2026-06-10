@@ -1,0 +1,17 @@
+# Environments & secrets
+.env
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Database (local dev data)
+*.db
+
+# OS / editor
+.DS_Store
