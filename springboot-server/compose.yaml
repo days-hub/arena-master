@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: arena-master-db
+    environment:
+      POSTGRES_DB: arenamaster
+      POSTGRES_USER: arena
+      POSTGRES_PASSWORD: arena
+    ports:
+      - "5432:5432"
+    volumes:
+      # postgres:18+ keeps its data under /var/lib/postgresql (not .../data);
+      # mounting at the old path makes the container exit on first start.
+      - arena-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arena -d arenamaster"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  arena-pgdata:

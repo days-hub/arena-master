@@ -2,7 +2,7 @@
 
 A full-stack tournament management platform for organizing and running single-elimination esports brackets — with a live web dashboard, click-to-record bracket progression, all-time standings, and Discord integration that announces results to your server as they happen.
 
-Built with **FastAPI + SQLite** on the backend, **React + Material UI** on the frontend, and a **discord.py** bot for chat-based control.
+Built with **Spring Boot + PostgreSQL** on the backend, **React + Material UI** on the frontend, and a **discord.py** bot for chat-based control.
 
 ![Tournament dashboard](docs/screenshots/dashboard.png)
 
@@ -20,20 +20,20 @@ Built with **FastAPI + SQLite** on the backend, **React + Material UI** on the f
 
 **Discord integration** — results recorded on the web are announced to your Discord server via webhook ("Krakens take Game 2, winning Match 1 with a score of 2-0!"), and a companion bot allows tournament control from chat. The web app works fully without Discord configured — notifications are best-effort.
 
-**Demo data seeder** — `seed_data.py` populates the app with four tournaments covering every state (completed with champion, mid-bracket, mid-series, and not yet started) so you can explore the full UI immediately.
+**Demo data seeder** — `seed_data.py` populates the app with four tournaments covering every state (completed with champion, mid-bracket, mid-series, and not yet started) so you can explore the full UI immediately. It drives the real HTTP API, so it works against any running backend.
 
 ## Stack
 
-| Layer    | Tech                                                        |
-| -------- | ----------------------------------------------------------- |
-| Backend  | FastAPI, SQLite (via `databases` + `aiosqlite`)             |
-| Frontend | React 18, Material UI 5, React Router, Axios                |
-| Bracket  | @g-loot/react-tournament-brackets                           |
-| Bot      | discord.py, Discord webhooks                                |
+| Layer    | Tech                                                          |
+| -------- | ------------------------------------------------------------- |
+| Backend  | Spring Boot 4 (Java 25), Spring Data JPA, PostgreSQL, Flyway  |
+| Frontend | React 18, Material UI 5, React Router, Axios                  |
+| Bracket  | @g-loot/react-tournament-brackets                             |
+| Bot      | discord.py, Discord webhooks                                  |
 
 ## Getting started
 
-Requires **Python 3.12+** and **Node 18+**.
+Requires **JDK 25**, **Docker Desktop** (for PostgreSQL), **Node 18+**, and **Python 3.12+** (seeder + Discord bot only).
 
 ```bash
 git clone https://github.com/days-hub/arena-master.git
@@ -43,12 +43,13 @@ cd arena-master
 **1. Backend**
 
 ```bash
-cd fastapi-server
-python -m venv venv
-venv\Scripts\activate          # Windows  (source venv/bin/activate on macOS/Linux)
-pip install fastapi uvicorn "databases[aiosqlite]" httpx discord.py python-dotenv
-uvicorn main:app --reload      # http://localhost:8000
+cd springboot-server
+./mvnw spring-boot:run         # http://localhost:8000
 ```
+
+That single command builds the app, starts PostgreSQL via Docker Compose,
+applies the Flyway schema migrations, and serves the API. No local Maven or
+Postgres install needed.
 
 **2. Frontend** (separate terminal)
 
@@ -58,7 +59,7 @@ npm install
 npm start                      # http://localhost:3000
 ```
 
-**3. Demo data** (optional, from the project root)
+**3. Demo data** (optional, from the project root, with the backend running)
 
 ```bash
 python seed_data.py            # seed four demo tournaments
@@ -86,6 +87,21 @@ Copy `.env.example` to `.env` and set `DISCORD_WEBHOOK_URL` (for result announce
 | `POST /api/tournaments/{name}/generate_and_list_matches` | Generate bracket (idempotent; `?force=true` to regenerate) |
 | `POST /api/tournaments/{name}/record_match_result`    | Record one game; advances rounds         |
 | `GET /api/tournaments/by_name/{name}`                 | Tournament with full match data          |
+
+## Notes for developers
+
+- The backend lives in `springboot-server/` — controllers (`web/`), business
+  logic (`service/`), JPA entities (`domain/`), Spring Data repositories
+  (`repository/`), and API request/response records (`dto/`).
+- The database schema is owned by Flyway
+  (`src/main/resources/db/migration/`); Hibernate runs in `validate` mode and
+  never alters tables.
+- Config follows 12-factor: Discord credentials and CORS origins come from
+  properties overridable by env vars (`DISCORD_BOT_TOKEN`,
+  `DISCORD_GUILD_ID`, `DISCORD_WEBHOOK_URL`), and the repo-root `.env` is
+  read automatically in dev.
+- Migrating data from a pre-2026 SQLite install:
+  `python springboot-server/scripts/migrate_sqlite_to_postgres.py | docker exec -i arena-master-db psql -U arena -d arenamaster -v ON_ERROR_STOP=1`
 
 ## Roadmap
 

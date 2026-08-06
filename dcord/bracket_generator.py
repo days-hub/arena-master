@@ -1,7 +1,7 @@
 """Render a single-elimination tournament bracket to a PNG using Pillow.
 
 Consumes the match records the rest of the app already produces (the ``matches``
-table / the FastAPI ``/api/tournaments/by_name/{name}`` response): each match is a
+table / the backend ``/api/tournaments/by_name/{name}`` response): each match is a
 dict with ``team_a``, ``team_b``, ``round_number`` and (optionally) ``winner``.
 Built for power-of-two brackets, matching the rest of the app's assumptions.
 """
