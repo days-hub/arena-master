@@ -1,0 +1,69 @@
+package com.arenamaster.api.security;
+
+import com.arenamaster.api.domain.User;
+import com.arenamaster.api.repository.UserRepository;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
+import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Turns a Discord login into a row in {@code users}: first login creates the
+ * account, later logins refresh the display name and avatar (people rename
+ * themselves) and stamp last_login_at.
+ */
+@Service
+public class DiscordOAuth2UserService extends DefaultOAuth2UserService {
+
+    public static final String ROLE_USER = "ROLE_USER";
+    public static final String ROLE_ADMIN = "ROLE_ADMIN";
+
+    private final UserRepository users;
+
+    public DiscordOAuth2UserService(UserRepository users) {
+        this.users = users;
+    }
+
+    @Override
+    @Transactional
+    public OAuth2User loadUser(OAuth2UserRequest request) throws OAuth2AuthenticationException {
+        OAuth2User oauthUser = super.loadUser(request);
+        Map<String, Object> attributes = oauthUser.getAttributes();
+
+        String discordId = (String) attributes.get("id");
+        // global_name is Discord's current display name; username is the
+        // legacy handle and is always present as a fallback.
+        String displayName = (String) attributes.getOrDefault("global_name", null);
+        if (displayName == null) {
+            displayName = (String) attributes.get("username");
+        }
+        String avatarHash = (String) attributes.get("avatar");
+        String avatarUrl = avatarHash == null ? null
+                : "https://cdn.discordapp.com/avatars/%s/%s.png".formatted(discordId, avatarHash);
+
+        User user = users.findByDiscordId(discordId).orElseGet(User::new);
+        user.setDiscordId(discordId);
+        user.setUsername(displayName);
+        user.setAvatarUrl(avatarUrl);
+        user.setLastLoginAt(Instant.now());
+        user = users.save(user);
+
+        List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+        authorities.add(new SimpleGrantedAuthority(ROLE_USER));
+        if (user.isAdmin()) {
+            authorities.add(new SimpleGrantedAuthority(ROLE_ADMIN));
+        }
+        // "id" matches user-name-attribute in the provider config, so
+        // Authentication#getName returns the Discord snowflake.
+        return new DefaultOAuth2User(authorities, attributes, "id");
+    }
+}
