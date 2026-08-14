@@ -8,6 +8,7 @@ import com.arenamaster.api.dto.TeamView;
 import com.arenamaster.api.error.ApiException;
 import com.arenamaster.api.notify.DiscordNotification;
 import com.arenamaster.api.repository.TeamRepository;
+import com.arenamaster.api.security.AccessControl;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -23,11 +24,14 @@ public class TeamService {
     private final TeamRepository teams;
     private final DiscordClient discord;
     private final ApplicationEventPublisher events;
+    private final AccessControl access;
 
-    public TeamService(TeamRepository teams, DiscordClient discord, ApplicationEventPublisher events) {
+    public TeamService(TeamRepository teams, DiscordClient discord, ApplicationEventPublisher events,
+                       AccessControl access) {
         this.teams = teams;
         this.discord = discord;
         this.events = events;
+        this.access = access;
     }
 
     private void announce(String message) {
@@ -41,6 +45,7 @@ public class TeamService {
      * roll the team back and change observable behavior.
      */
     public TeamView create(CreateTeamRequest request) {
+        access.requireGuildMember();
         if (teams.existsByName(request.name())) {
             throw new ApiException(400, "Team already exists");
         }
@@ -60,6 +65,7 @@ public class TeamService {
 
     /** POST /api/teams/create-channels — same call, "-general" suffix, fixed 400 on failure. */
     public Map<String, String> createChannelFor(String teamName) {
+        access.requireGuildMember();
         String channelName = teamName.toLowerCase().replace(' ', '-') + "-general";
         int status = discord.createChannel(channelName);
         if (status != 201) {
@@ -82,6 +88,7 @@ public class TeamService {
 
     @Transactional
     public Map<String, String> addMember(AddMemberRequest request) {
+        access.requireGuildMember();
         Team team = teams.findById(request.teamId())
                 .orElseThrow(() -> new ApiException(404, "Team not found"));
         if (team.getMembers().contains(request.memberId())) {
@@ -93,6 +100,7 @@ public class TeamService {
 
     @Transactional
     public TeamView update(Long id, CreateTeamRequest request) {
+        access.requireGuildMember();
         Team team = teams.findById(id).orElseThrow(() -> new ApiException(404, "Team not found"));
         team.setName(request.name());
         team.setMembers(new ArrayList<>(request.membersOrEmpty()));
@@ -100,6 +108,7 @@ public class TeamService {
     }
 
     public Map<String, String> delete(Long id) {
+        access.requireGuildMember();
         Team team = teams.findById(id).orElseThrow(() -> new ApiException(404, "Team not found"));
         teams.delete(team);
         announce("Team \"%s\" has been deleted.".formatted(team.getName()));

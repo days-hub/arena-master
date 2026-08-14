@@ -5,6 +5,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.config.Customizer;
@@ -47,10 +48,19 @@ public class SecurityConfig {
                 // tokens exist to stop.
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        // Stage A: nothing is locked down yet — logging in
-                        // works and /api/me reports who you are, while every
-                        // existing client keeps working unchanged.
-                        .anyRequest().permitAll())
+                        // Reading a bracket, the standings or the dashboard
+                        // stays open to anyone — spectators don't sign in.
+                        .requestMatchers(HttpMethod.GET,
+                                "/", "/api/games", "/api/tournaments/**", "/api/standings",
+                                "/api/teams", "/api/teams/**").permitAll()
+                        .requestMatchers("/actuator/health").permitAll()
+                        // Reports 401 itself, with a body the frontend reads.
+                        .requestMatchers("/api/me").permitAll()
+                        // Login endpoints must stay reachable while signed out.
+                        .requestMatchers("/oauth2/**", "/login/**").permitAll()
+                        // Everything else — every write, plus the guild member
+                        // list and the notify relay — needs an account.
+                        .anyRequest().authenticated())
                 .logout(logout -> logout
                         .logoutUrl("/api/logout")
                         .logoutSuccessHandler((request, response, authentication) ->

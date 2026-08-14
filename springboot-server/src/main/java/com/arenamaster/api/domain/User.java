@@ -39,6 +39,10 @@ public class User {
     @Column(name = "is_admin", nullable = false)
     private boolean admin;
 
+    /** Member of the configured Discord guild, refreshed at each login. */
+    @Column(name = "guild_member", nullable = false)
+    private boolean guildMember;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
 

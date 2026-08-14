@@ -2,6 +2,7 @@ package com.arenamaster.api.service;
 
 import com.arenamaster.api.domain.Match;
 import com.arenamaster.api.domain.Tournament;
+import com.arenamaster.api.domain.User;
 import com.arenamaster.api.dto.GeneratedMatch;
 import com.arenamaster.api.dto.MatchResultRequest;
 import com.arenamaster.api.dto.MatchView;
@@ -15,6 +16,7 @@ import com.arenamaster.api.error.ApiException;
 import com.arenamaster.api.notify.DiscordNotification;
 import com.arenamaster.api.repository.MatchRepository;
 import com.arenamaster.api.repository.TournamentRepository;
+import com.arenamaster.api.security.AccessControl;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
@@ -45,12 +47,14 @@ public class TournamentService {
     private final TournamentRepository tournaments;
     private final MatchRepository matches;
     private final ApplicationEventPublisher events;
+    private final AccessControl access;
 
     public TournamentService(TournamentRepository tournaments, MatchRepository matches,
-                             ApplicationEventPublisher events) {
+                             ApplicationEventPublisher events, AccessControl access) {
         this.tournaments = tournaments;
         this.matches = matches;
         this.events = events;
+        this.access = access;
     }
 
     private void announce(String message) {
@@ -70,6 +74,7 @@ public class TournamentService {
     }
 
     public TournamentResponse create(TournamentCreateRequest request) {
+        User creator = access.requireGuildMember();
         String name = request.name() == null ? "" : request.name().strip();
         if (name.isEmpty()) {
             throw new ApiException(400, "Tournament name cannot be empty.");
@@ -81,6 +86,7 @@ public class TournamentService {
         t.setName(name);
         t.setGame(request.game());
         t.setFormat(request.formatOrDefault());
+        t.setCreatedBy(creator);
         try {
             t = tournaments.save(t);
         } catch (DataIntegrityViolationException e) {
@@ -97,6 +103,7 @@ public class TournamentService {
         // Legacy: no 404 here — updating a missing id was a silent no-op that
         // still echoed the request back.
         tournaments.findById(id).ifPresent(t -> {
+            access.requireCanManage(t);
             t.setName(request.name());
             t.setGame(request.game());
             t.setFormat(request.formatOrDefault());
@@ -109,13 +116,19 @@ public class TournamentService {
     public void delete(Long id) {
         // Legacy: deleting a missing id still returned 204. Matches go with
         // the tournament via the FK's ON DELETE CASCADE.
-        tournaments.findById(id).ifPresent(tournaments::delete);
+        tournaments.findById(id).ifPresent(t -> {
+            access.requireCanManage(t);
+            tournaments.delete(t);
+        });
     }
 
     // ---------- Registration ----------
 
     @Transactional
     public Map<String, Object> register(String tournamentName, RegisterTeamRequest request) {
+        // Any guild member may enter a team; managing the bracket is the
+        // creator's job, but signing up shouldn't be.
+        access.requireGuildMember();
         Tournament t = findByNameOr404(tournamentName,
                 "Tournament '%s' not found".formatted(tournamentName));
         if (t.hasTeam(request.teamName())) {
@@ -144,6 +157,7 @@ public class TournamentService {
     @Transactional
     public Map<String, Object> generateBracket(String tournamentName, boolean force) {
         Tournament t = findByNameOr404(tournamentName, "Tournament not found");
+        access.requireCanManage(t);
         List<String> teams = new ArrayList<>(t.teamNames());
         if (teams.isEmpty()) {
             return Map.of("message", "No teams registered for the tournament");
@@ -181,6 +195,7 @@ public class TournamentService {
     @Transactional
     public Map<String, Object> recordResult(String tournamentName, MatchResultRequest request) {
         Tournament t = findByNameOr404(tournamentName, "Tournament not found");
+        access.requireCanManage(t);
         Match match = matches.findByTournamentIdAndMatchNumber(t.getId(), request.matchNumber())
                 .orElseThrow(() -> new ApiException(404, "Match not found"));
 

@@ -80,6 +80,27 @@ public class DiscordClient {
         }
     }
 
+    /**
+     * Is this user (identified by their own OAuth access token, not the bot
+     * token) a member of the given guild? Fails closed: if Discord can't be
+     * reached we report "not a member" rather than granting access on an
+     * error.
+     */
+    public boolean isMemberOfGuild(String accessToken, String guildId) {
+        try {
+            List<Map<String, Object>> guilds = http.get()
+                    .uri("https://discord.com/api/v10/users/@me/guilds")
+                    .header("Authorization", "Bearer " + accessToken)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {
+                    });
+            return guilds != null && guilds.stream().anyMatch(g -> guildId.equals(g.get("id")));
+        } catch (RestClientException e) {
+            log.warn("Could not check guild membership: {}", e.getMessage());
+            return false;
+        }
+    }
+
     public List<MemberView> fetchMembers() {
         List<Map<String, Object>> raw = http.get()
                 .uri("https://discord.com/api/guilds/{guild}/members?limit=1000", props.guildId())

@@ -1,7 +1,10 @@
 package com.arenamaster.api.security;
 
+import com.arenamaster.api.config.DiscordProperties;
+import com.arenamaster.api.discord.DiscordClient;
 import com.arenamaster.api.domain.User;
 import com.arenamaster.api.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
@@ -12,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -27,9 +31,22 @@ public class DiscordOAuth2UserService extends DefaultOAuth2UserService {
     public static final String ROLE_ADMIN = "ROLE_ADMIN";
 
     private final UserRepository users;
+    private final DiscordClient discord;
+    private final DiscordProperties discordProps;
+    private final List<String> adminDiscordIds;
 
-    public DiscordOAuth2UserService(UserRepository users) {
+    public DiscordOAuth2UserService(UserRepository users, DiscordClient discord,
+                                    DiscordProperties discordProps,
+                                    @Value("${app.admin-discord-ids:}") String adminIds) {
         this.users = users;
+        this.discord = discord;
+        this.discordProps = discordProps;
+        // Admins come from config rather than a hand-edited database flag, so
+        // a fresh deployment can bootstrap its first admin without SQL.
+        this.adminDiscordIds = Arrays.stream(adminIds.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 
     // Deliberately not @Transactional: the upsert is a single save(), which
@@ -52,10 +69,18 @@ public class DiscordOAuth2UserService extends DefaultOAuth2UserService {
         String avatarUrl = avatarHash == null ? null
                 : "https://cdn.discordapp.com/avatars/%s/%s.png".formatted(discordId, avatarHash);
 
+        // No guild configured means no community to gate on, so don't lock
+        // everyone out of a single-tenant install.
+        String guildId = discordProps.guildId();
+        boolean guildMember = guildId == null || guildId.isBlank()
+                || discord.isMemberOfGuild(request.getAccessToken().getTokenValue(), guildId);
+
         User user = users.findByDiscordId(discordId).orElseGet(User::new);
         user.setDiscordId(discordId);
         user.setUsername(displayName);
         user.setAvatarUrl(avatarUrl);
+        user.setGuildMember(guildMember);
+        user.setAdmin(adminDiscordIds.contains(discordId));
         user.setLastLoginAt(Instant.now());
         user = users.save(user);
 
