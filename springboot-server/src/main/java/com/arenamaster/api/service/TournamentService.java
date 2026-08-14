@@ -12,8 +12,10 @@ import com.arenamaster.api.dto.TournamentCreateRequest;
 import com.arenamaster.api.dto.TournamentOverview;
 import com.arenamaster.api.dto.TournamentResponse;
 import com.arenamaster.api.error.ApiException;
+import com.arenamaster.api.notify.DiscordNotification;
 import com.arenamaster.api.repository.MatchRepository;
 import com.arenamaster.api.repository.TournamentRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -42,10 +44,17 @@ public class TournamentService {
 
     private final TournamentRepository tournaments;
     private final MatchRepository matches;
+    private final ApplicationEventPublisher events;
 
-    public TournamentService(TournamentRepository tournaments, MatchRepository matches) {
+    public TournamentService(TournamentRepository tournaments, MatchRepository matches,
+                             ApplicationEventPublisher events) {
         this.tournaments = tournaments;
         this.matches = matches;
+        this.events = events;
+    }
+
+    private void announce(String message) {
+        events.publishEvent(new DiscordNotification(message));
     }
 
     // ---------- CRUD ----------
@@ -78,6 +87,8 @@ public class TournamentService {
             // Race on the partial unique index — same 400 the old backend gave.
             throw new ApiException(400, "Tournament with name '%s' already exists.".formatted(name));
         }
+        announce("A new tournament \"%s\" has been created for %s in %s format."
+                .formatted(name, t.getGame(), t.getFormat()));
         return new TournamentResponse(t.getId(), name, t.getGame(), t.getFormat(), List.of(), List.of());
     }
 
@@ -112,6 +123,8 @@ public class TournamentService {
                     .formatted(request.teamName(), tournamentName));
         }
         t.registerTeam(request.teamName());
+        announce("Team \"%s\" has been registered for tournament \"%s\"."
+                .formatted(request.teamName(), tournamentName));
         return Map.of("message", "Team '%s' registered for tournament '%s' successfully"
                 .formatted(request.teamName(), tournamentName));
     }
@@ -214,6 +227,7 @@ public class TournamentService {
 
         Map<String, Object> response = new LinkedHashMap<>();
         if (!roundComplete) {
+            announce(message);
             response.put("message", message);
             return response;
         }
@@ -224,6 +238,7 @@ public class TournamentService {
             t.setStatus("Completed");
             message += "\n\n🏆 The tournament is complete! Congratulations to the winner: %s. What an epic journey! 🎉"
                     .formatted(nextRoundTeams.get(0));
+            announce(message);
             response.put("message", message);
             return response;
         }
@@ -234,6 +249,7 @@ public class TournamentService {
         message += "\n\nNext round matches generated:\n" + nextRound.stream()
                 .map(m -> "Match %d: %s vs %s".formatted(m.matchId(), m.teamA(), m.teamB()))
                 .collect(Collectors.joining("\n"));
+        announce(message);
         response.put("message", message);
         response.put("next_round_matches", nextRound);
         return response;

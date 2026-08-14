@@ -27,13 +27,18 @@ public class DiscordClient {
 
     private static final String API_BASE = "https://discord.com/api/v9";
 
+    // Discord's edge (Cloudflare) rejects unrecognized clients with HTTP 403
+    // error 1010, so identify ourselves in the format Discord asks for.
+    private static final String USER_AGENT =
+            "ArenaMaster (https://github.com/days-hub/arena-master, 1.0)";
+
     private final RestClient http;
     private final DiscordProperties props;
 
     public DiscordClient(DiscordProperties props) {
         // Boot 4 split RestClient auto-configuration into its own starter;
-        // plain create() is all this client needs.
-        this.http = RestClient.create();
+        // building it here is all this client needs.
+        this.http = RestClient.builder().defaultHeader("User-Agent", USER_AGENT).build();
         this.props = props;
     }
 
@@ -48,19 +53,27 @@ public class DiscordClient {
     }
 
     /**
-     * Best-effort webhook post. Faithful to the old backend: only transport
-     * failures count as failure — an error *response* from Discord was never
-     * checked, so it isn't here either.
+     * Best-effort webhook post: never throws, so a Discord outage can't fail
+     * the action that triggered the announcement. Unlike the old backend it
+     * does inspect the response — now that announcements originate here
+     * rather than in the browser, a silently dropped one would be invisible.
      */
     public boolean sendWebhook(Object message) {
         try {
-            http.post()
+            return http.post()
                     .uri(props.webhookUrl())
                     .contentType(MediaType.APPLICATION_JSON)
                     // singletonMap, not Map.of: content may legitimately be null
                     .body(Collections.singletonMap("content", message))
-                    .exchange((request, response) -> true);
-            return true;
+                    .exchange((request, response) -> {
+                        if (response.getStatusCode().isError()) {
+                            log.warn("Discord rejected the webhook post: HTTP {} {}",
+                                    response.getStatusCode().value(),
+                                    response.bodyTo(String.class));
+                            return false;
+                        }
+                        return true;
+                    });
         } catch (RestClientException e) {
             log.warn("Failed to send Discord notification: {}", e.getMessage());
             return false;

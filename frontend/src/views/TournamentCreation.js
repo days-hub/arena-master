@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Box, TextField, Select, MenuItem, FormControl, InputLabel, RadioGroup, FormControlLabel, Radio, Button, Typography, List, ListItem, ListItemText } from '@mui/material';
-import { createTournament, fetchTournaments, deleteTournament, sendWebhookMessage } from '../api/apiClient';
+import { createTournament, fetchTournaments, deleteTournament } from '../api/apiClient';
 const BASE_URL = 'http://localhost:8000/api';
 const TournamentCreation = () => {
   // Existing state variables
@@ -44,11 +44,6 @@ const TournamentCreation = () => {
       // Refresh tournament list
       const fetchedTournaments = await fetchTournaments();
       setTournaments(fetchedTournaments.data);
-
-      // Notify Discord (best-effort — won't fail creation if the webhook is unset)
-      await sendWebhookMessage(
-        `A new tournament "${tournamentName}" has been created for ${game} in ${format} format.`
-      );
     } catch (error) {
       console.error('Failed to create tournament:', error);
       alert('Failed to create tournament. Please try again.');

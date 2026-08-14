@@ -7,8 +7,10 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, Typography, Alert,
 } from '@mui/material';
 import { useParams } from 'react-router-dom';
+// Discord announcements are sent by the backend, so results recorded here,
+// via the bot, or through the API all announce identically.
 import {
-  fetchTournaments, generateAndListMatches, fetchTournamentByName, recordMatchResult, sendWebhookMessage,
+  fetchTournaments, generateAndListMatches, fetchTournamentByName, recordMatchResult,
 } from '../api/apiClient';
 import { transformApiMatches } from '../tournamentUtils';
 import { BRAND } from '../theme';
@@ -151,7 +153,6 @@ const TournamentBracketComponent = () => {
       });
       const message = response.data?.message || 'Result recorded.';
       setResultMessage({ severity: 'success', text: message });
-      sendWebhookMessage(message);
       setDialogMatch(null);
       await loadBracket(selectedTournament);
     } catch (error) {

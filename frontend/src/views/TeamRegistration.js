@@ -38,7 +38,6 @@ const TeamRegistration = () => {
     setTeams([...teams, response.data]);
     setTeamNameForCreation('');
     setSelectedMembers([]);
-    await sendWebhookMessage(`Team "${teamNameForCreation}" has been created.`);
   };
 
   const handleRegisterTeam = async (event) => {
@@ -49,13 +48,14 @@ const TeamRegistration = () => {
     }
     await registerTeam(tournament, { team_name: selectedTeamForRegistration });
     alert('Team registered successfully!');
-    await sendWebhookMessage(`Team "${selectedTeamForRegistration}" has been registered for tournament "${tournament}".`);
   };
 
   const handleAddMember = async (teamId, memberId) => {
     await addMemberToTeam(teamId, memberId);
     const team = await fetchTeamById(teamId);
     const member = discordMembers.find((m) => m.id === memberId);
+    // Still sent from here: only the client has the member's Discord display
+    // name; the backend stores ids and would announce a bare snowflake.
     await sendWebhookMessage(`Member "${member.name}" has been added to team "${team.data.name}".`);
     alert('Member added successfully to the team!');
   };
@@ -64,7 +64,6 @@ const TeamRegistration = () => {
       await deleteTeam(teamId);
       setTeams(teams.filter((team) => team.id !== teamId));
       alert('Team deleted successfully!');
-      await sendWebhookMessage(`Team with ID ${teamId} has been deleted.`);
     } catch (error) {
       console.error('Error deleting team:', error);
       alert('Failed to delete team. Please try again.');

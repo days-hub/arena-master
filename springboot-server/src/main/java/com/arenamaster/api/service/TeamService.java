@@ -6,7 +6,9 @@ import com.arenamaster.api.dto.AddMemberRequest;
 import com.arenamaster.api.dto.CreateTeamRequest;
 import com.arenamaster.api.dto.TeamView;
 import com.arenamaster.api.error.ApiException;
+import com.arenamaster.api.notify.DiscordNotification;
 import com.arenamaster.api.repository.TeamRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,10 +22,16 @@ public class TeamService {
 
     private final TeamRepository teams;
     private final DiscordClient discord;
+    private final ApplicationEventPublisher events;
 
-    public TeamService(TeamRepository teams, DiscordClient discord) {
+    public TeamService(TeamRepository teams, DiscordClient discord, ApplicationEventPublisher events) {
         this.teams = teams;
         this.discord = discord;
+        this.events = events;
+    }
+
+    private void announce(String message) {
+        events.publishEvent(new DiscordNotification(message));
     }
 
     /**
@@ -42,6 +50,7 @@ public class TeamService {
         team = teams.save(team);
 
         String channelName = request.name().toLowerCase().replace(' ', '-');
+        announce("Team \"%s\" has been created.".formatted(request.name()));
         int status = discord.createChannel(channelName);
         if (status != 201) {
             throw new ApiException(status, "Failed to create Discord channel");
@@ -93,6 +102,7 @@ public class TeamService {
     public Map<String, String> delete(Long id) {
         Team team = teams.findById(id).orElseThrow(() -> new ApiException(404, "Team not found"));
         teams.delete(team);
+        announce("Team \"%s\" has been deleted.".formatted(team.getName()));
         return Map.of("message", "Team successfully deleted");
     }
 
