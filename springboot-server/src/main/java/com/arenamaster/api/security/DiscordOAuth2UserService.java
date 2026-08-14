@@ -9,7 +9,6 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -33,8 +32,11 @@ public class DiscordOAuth2UserService extends DefaultOAuth2UserService {
         this.users = users;
     }
 
+    // Deliberately not @Transactional: the upsert is a single save(), which
+    // Spring Data already runs in its own transaction, and annotating this
+    // method makes Spring proxy DefaultOAuth2UserService — whose final methods
+    // CGLIB then warns it cannot proxy.
     @Override
-    @Transactional
     public OAuth2User loadUser(OAuth2UserRequest request) throws OAuth2AuthenticationException {
         OAuth2User oauthUser = super.loadUser(request);
         Map<String, Object> attributes = oauthUser.getAttributes();
