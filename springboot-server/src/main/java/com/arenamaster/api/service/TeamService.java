@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 @Service
 public class TeamService {
@@ -35,6 +36,11 @@ public class TeamService {
     }
 
     private void announce(String message) {
+        events.publishEvent(DiscordNotification.of(message));
+    }
+
+    /** For messages that need a lookup before they can be written. */
+    private void announceLazy(Supplier<String> message) {
         events.publishEvent(new DiscordNotification(message));
     }
 
@@ -95,6 +101,18 @@ public class TeamService {
             throw new ApiException(400, "Member already exists in team");
         }
         team.getMembers().add(request.memberId());
+
+        // Resolved after commit, off the request thread: we store snowflakes,
+        // and announcing a raw id at people would be useless. If Discord
+        // can't be reached the announcement still says something true.
+        String teamName = team.getName();
+        long memberId = request.memberId();
+        announceLazy(() -> {
+            String displayName = discord.fetchMemberDisplayName(memberId);
+            return displayName == null
+                    ? "A new member has been added to team \"%s\".".formatted(teamName)
+                    : "Member \"%s\" has been added to team \"%s\".".formatted(displayName, teamName);
+        });
         return Map.of("message", "Member added to team successfully");
     }
 

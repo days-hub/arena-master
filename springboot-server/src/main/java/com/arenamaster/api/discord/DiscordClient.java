@@ -101,6 +101,42 @@ public class DiscordClient {
         }
     }
 
+    /**
+     * Display name for one guild member, preferring their server nickname,
+     * then their Discord display name, then the legacy handle. Returns null
+     * if they can't be looked up — callers should degrade rather than
+     * announce a raw snowflake at people.
+     */
+    public String fetchMemberDisplayName(long userId) {
+        try {
+            Map<String, Object> member = http.get()
+                    .uri(API_BASE + "/guilds/{guild}/members/{user}", props.guildId(), userId)
+                    .header("Authorization", "Bot " + props.botToken())
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {
+                    });
+            if (member == null) {
+                return null;
+            }
+            String nick = (String) member.get("nick");
+            if (nick != null && !nick.isBlank()) {
+                return nick;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> user = (Map<String, Object>) member.get("user");
+            if (user == null) {
+                return null;
+            }
+            String globalName = (String) user.get("global_name");
+            return globalName != null && !globalName.isBlank()
+                    ? globalName
+                    : (String) user.get("username");
+        } catch (RestClientException e) {
+            log.warn("Could not look up Discord member {}: {}", userId, e.getMessage());
+            return null;
+        }
+    }
+
     public List<MemberView> fetchMembers() {
         List<Map<String, Object>> raw = http.get()
                 .uri("https://discord.com/api/guilds/{guild}/members?limit=1000", props.guildId())

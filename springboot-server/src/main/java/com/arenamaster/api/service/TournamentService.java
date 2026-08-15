@@ -58,7 +58,7 @@ public class TournamentService {
     }
 
     private void announce(String message) {
-        events.publishEvent(new DiscordNotification(message));
+        events.publishEvent(DiscordNotification.of(message));
     }
 
     // ---------- CRUD ----------

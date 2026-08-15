@@ -45,6 +45,12 @@ public class DiscordNotifier {
             log.debug("DISCORD_WEBHOOK_URL is not configured; skipping notification.");
             return;
         }
-        discord.sendWebhook(notification.message());
+        // Built here, not at publish time: a message that needs a Discord
+        // lookup does it on this thread, after the transaction committed.
+        String message = notification.message().get();
+        if (message == null) {
+            return;
+        }
+        discord.sendWebhook(message);
     }
 }
