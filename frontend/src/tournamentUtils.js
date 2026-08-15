@@ -119,7 +119,9 @@ function transformTournamentData(matchesData) {
           name: isFinal ? 'Final' : `Round ${round} - Match ${pos + 1}`,
           nextMatchId: isFinal ? null : idFor(round + 1, Math.floor(pos / 2)),
           startTime: (source && source.startTime) || '',
-          state: source && source.winner ? 'DONE' : 'SCHEDULED',
+          state: source && source.winner
+            ? (source.state === 'FORFEIT' ? 'FORFEIT' : 'DONE')
+            : (source && source.state) || 'SCHEDULED',
           participants: [
             buildParticipant(ps[0], `${idFor(round, pos)}-a`),
             buildParticipant(ps[1], `${idFor(round, pos)}-b`),
@@ -127,6 +129,25 @@ function transformTournamentData(matchesData) {
         });
       }
     }
+
+    // Surface an advancing team in the next-round placeholder immediately.
+    // The backend creates the real next-round match once the whole current
+    // round is decided, but the bracket should still show each winner moving
+    // forward as soon as their own match finishes.
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    nodes.forEach((node) => {
+      if (!node.nextMatchId || node.state === 'SCHEDULED') return;
+      const winner = node.participants.find((participant) => participant.isWinner);
+      const destination = nodeById.get(node.nextMatchId);
+      if (!winner || !destination || destination.dbMatchId) return;
+      const sourcePosition = Number(node.id.split('-')[1]) || 0;
+      destination.participants[sourcePosition % 2] = {
+        ...winner,
+        isWinner: false,
+        resultText: null,
+        status: 'ADVANCED',
+      };
+    });
     return nodes;
   }
 

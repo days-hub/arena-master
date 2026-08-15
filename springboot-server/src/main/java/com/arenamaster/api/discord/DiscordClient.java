@@ -108,6 +108,12 @@ public class DiscordClient {
      * announce a raw snowflake at people.
      */
     public String fetchMemberDisplayName(long userId) {
+        MemberView member = fetchMember(userId);
+        return member == null ? null : member.name();
+    }
+
+    /** Resolves one guild member without exposing the complete guild directory. */
+    public MemberView fetchMember(long userId) {
         try {
             Map<String, Object> member = http.get()
                     .uri(API_BASE + "/guilds/{guild}/members/{user}", props.guildId(), userId)
@@ -118,19 +124,7 @@ public class DiscordClient {
             if (member == null) {
                 return null;
             }
-            String nick = (String) member.get("nick");
-            if (nick != null && !nick.isBlank()) {
-                return nick;
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> user = (Map<String, Object>) member.get("user");
-            if (user == null) {
-                return null;
-            }
-            String globalName = (String) user.get("global_name");
-            return globalName != null && !globalName.isBlank()
-                    ? globalName
-                    : (String) user.get("username");
+            return toMemberView(member);
         } catch (RestClientException e) {
             log.warn("Could not look up Discord member {}: {}", userId, e.getMessage());
             return null;
@@ -150,14 +144,31 @@ public class DiscordClient {
 
         List<MemberView> members = new ArrayList<>();
         for (Map<String, Object> member : raw) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> user = (Map<String, Object>) member.get("user");
-            String userId = (String) user.get("id");
-            String avatarHash = (String) user.get("avatar");
-            String avatarUrl = avatarHash == null ? null
-                    : "https://cdn.discordapp.com/avatars/%s/%s.png".formatted(userId, avatarHash);
-            members.add(new MemberView(userId, (String) user.get("username"), avatarUrl));
+            MemberView resolved = toMemberView(member);
+            if (resolved != null) {
+                members.add(resolved);
+            }
         }
         return members;
+    }
+
+    @SuppressWarnings("unchecked")
+    private MemberView toMemberView(Map<String, Object> member) {
+        Map<String, Object> user = (Map<String, Object>) member.get("user");
+        if (user == null) {
+            return null;
+        }
+        String userId = (String) user.get("id");
+        String nick = (String) member.get("nick");
+        String globalName = (String) user.get("global_name");
+        String username = (String) user.get("username");
+        String name = nick != null && !nick.isBlank()
+                ? nick
+                : globalName != null && !globalName.isBlank() ? globalName : username;
+        String avatarHash = (String) user.get("avatar");
+        String avatarUrl = avatarHash == null
+                ? null
+                : "https://cdn.discordapp.com/avatars/%s/%s.png".formatted(userId, avatarHash);
+        return new MemberView(userId, name, avatarUrl);
     }
 }

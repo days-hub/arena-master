@@ -1,272 +1,286 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  SingleEliminationBracket, Match, SVGViewer, createTheme as createBracketTheme,
-} from '@g-loot/react-tournament-brackets';
-import {
-  Box, Select, MenuItem, FormControl, InputLabel, Button, Stack,
-  Dialog, DialogTitle, DialogContent, DialogActions, Typography, Alert,
+  Alert, Box, Button, Card, CircularProgress, Dialog, DialogActions,
+  DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select,
+  Skeleton, Stack, Typography,
 } from '@mui/material';
-import { useParams } from 'react-router-dom';
-// Discord announcements are sent by the backend, so results recorded here,
-// via the bot, or through the API all announce identically.
 import {
-  fetchTournaments, generateAndListMatches, fetchTournamentByName, recordMatchResult,
+  AccountTreeRounded, AutorenewRounded, FullscreenRounded, LockOutlined,
+  RefreshRounded,
+} from '@mui/icons-material';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  fetchTeams, fetchTournaments, generateAndListMatches, fetchTournamentByName,
+  fetchTeamRoster, getApiErrorMessage, recordMatchResult,
 } from '../api/apiClient';
+import { useAuth } from '../auth/AuthContext';
 import { transformApiMatches } from '../tournamentUtils';
-import { BRAND } from '../theme';
+import PageHeader from '../components/PageHeader';
+import EmptyState from '../components/EmptyState';
+import GameUpdatePanel from '../components/GameUpdatePanel';
+import VictoryCelebration from '../components/VictoryCelebration';
+import GameIcon from '../components/GameIcon';
+import ResponsiveBracket from '../components/ResponsiveBracket';
 
-// Light bracket theme derived from the app palette (the library uses its own
-// styled-components theme, so we mirror BRAND values into it here).
-const bracketTheme = createBracketTheme({
-  fontFamily: '"Roboto", "Arial", "Helvetica", sans-serif',
-  roundHeaders: { background: BRAND.teal },
-  matchBackground: { wonColor: '#E3F2F1', lostColor: BRAND.paper },
-  border: { color: '#D7DEDD', highlightedColor: BRAND.teal },
-  textColor: { main: BRAND.ink, highlighted: '#10302F', dark: '#7B8794', disabled: '#A8B0B9' },
-  score: {
-    text: { highlightedWonColor: BRAND.teal, highlightedLostColor: '#B45309' },
-    background: { wonColor: '#F0F7F6', lostColor: '#F3F4F6' },
-  },
-  connectorColor: '#C9D4D2',
-  connectorColorHighlight: BRAND.teal,
-  canvasBackground: BRAND.canvas,
-});
-
-// Geometry: the library defaults to 110px-tall match boxes, but MUI's
-// CssBaseline raises the global line-height and the bottom label clips at
-// 110. We pass a taller boxHeight via `options` and keep our viewer-height
-// math in sync with it. (Library defaults: 300 wide + 50 column gap,
-// 50 row gap, 25 canvas padding, ~65px round header.)
-const BOX_HEIGHT = 140;
-const COLUMN_SPAN = 350;
-const ROW_SPAN = BOX_HEIGHT + 50;
-
-const TournamentBracketComponent = () => {
+const TournamentBracket = () => {
   const { tournamentName: routeTournamentName } = useParams();
-  const [tournament, setTournament] = useState('');
+  const navigate = useNavigate();
+  const { isAuthenticated, signIn } = useAuth();
   const [tournaments, setTournaments] = useState([]);
-  const [selectedTournament, setSelectedTournament] = useState(null);
+  const [selectedTournament, setSelectedTournament] = useState('');
+  const [selectedGame, setSelectedGame] = useState('');
   const [bracketMatches, setBracketMatches] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [teamIcons, setTeamIcons] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [recording, setRecording] = useState(false);
   const [dialogMatch, setDialogMatch] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
   const [resultMessage, setResultMessage] = useState(null);
-
-  // Responsive viewer: track the container's width so the bracket gets the
-  // whole page instead of a fixed 500px keyhole.
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [victory, setVictory] = useState({ open: false, teamName: '', members: [], loading: false });
+  const shownVictories = useRef(new Set());
   const containerRef = useRef(null);
-  const [viewerWidth, setViewerWidth] = useState(900);
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return undefined;
-    const measure = () => setViewerWidth(Math.max(600, el.clientWidth - 8));
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  const realMatches = bracketMatches.filter((match) => match.dbMatchId);
+  const decidedMatches = bracketMatches.filter((match) => match.participants.some((participant) => participant.isWinner)).length;
+  const bracketProgress = bracketMatches.length ? Math.round((decidedMatches / bracketMatches.length) * 100) : 0;
+  const finalMatch = bracketMatches.find((match) => match.nextMatchId == null && match.dbMatchId);
+  const championName = finalMatch?.participants.find((participant) => participant.isWinner)?.name || '';
+  const finalComplete = Boolean(championName);
 
-  // Height scales with bracket size: enough rows for round 1, enough width
-  // for every round (the SVG pans/zooms inside the viewer either way).
-  const roundOneCount = bracketMatches.filter((m) => String(m.id).startsWith('r1-')).length;
-  const roundCount = roundOneCount > 0 ? Math.ceil(Math.log2(roundOneCount)) + 1 : 1;
-  const viewerHeight = Math.max(450, roundOneCount * ROW_SPAN + 120);
-  const contentWidth = Math.max(viewerWidth, roundCount * COLUMN_SPAN + 50);
+  const bracketUpdate = !selectedTournament
+    ? { tone: 'setup', title: 'Pick an arena', message: 'Choose a tournament and I’ll load its path to the trophy.' }
+    : loading
+      ? { tone: 'live', title: 'Refreshing the bracket…', message: 'I’m checking the latest scores and round progression.' }
+      : finalComplete
+        ? { tone: 'celebrate', title: 'We have a champion!', message: `Every match in ${selectedTournament} is decided. That deserves a victory lap.`, progress: 100 }
+        : realMatches.length
+          ? { tone: 'live', title: `${bracketMatches.length - decidedMatches} matches still in play`, message: `${decidedMatches} of ${bracketMatches.length} matches are decided. Click any active matchup to report the next game.`, progress: bracketProgress }
+          : { tone: 'setup', title: 'Ready for the opening draw', message: 'Once at least two teams are registered, generate the bracket and I’ll take it from there.' };
 
-  // Load a tournament's existing bracket. View-only: safe on mount, refresh,
-  // and after generating or recording.
-  const loadBracket = useCallback(async (name) => {
+  const loadBracket = useCallback(async (name, { silent = false } = {}) => {
     if (!name) return;
-    setIsLoading(true);
+    if (!silent) setLoading(true);
+    setResultMessage(null);
     try {
       const response = await fetchTournamentByName(name);
+      setSelectedGame(response.data.game || '');
       setBracketMatches(transformApiMatches(response.data.matches));
     } catch (error) {
-      console.error('Error loading bracket:', error);
-    } finally {
-      setIsLoading(false);
-    }
+      setBracketMatches([]);
+      setResultMessage({ severity: 'error', text: getApiErrorMessage(error, 'The bracket could not be loaded.') });
+    } finally { if (!silent) setLoading(false); }
   }, []);
 
-  // Deep link support: /bracket/:tournamentName (e.g. links from the
-  // dashboard or the Discord bot) selects and loads on mount.
+  useEffect(() => {
+    const loadTournaments = async () => {
+      try {
+        const [tournamentResponse, teamResponse] = await Promise.all([fetchTournaments(), fetchTeams()]);
+        setTournaments(Array.isArray(tournamentResponse.data) ? tournamentResponse.data : []);
+        const teams = Array.isArray(teamResponse.data) ? teamResponse.data : [];
+        setTeamIcons(Object.fromEntries(teams.map((team) => [team.name, team.avatar_url || ''])));
+      } catch (error) {
+        setResultMessage({ severity: 'error', text: getApiErrorMessage(error, 'Tournaments could not be loaded.') });
+      }
+    };
+    loadTournaments();
+  }, []);
+
   useEffect(() => {
     if (!routeTournamentName) return;
-    const decoded = decodeURIComponent(routeTournamentName);
-    setTournament(decoded);
+    const decoded = routeTournamentName;
     setSelectedTournament(decoded);
     loadBracket(decoded);
   }, [routeTournamentName, loadBracket]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      const tournamentsData = await fetchTournaments();
-      if (Array.isArray(tournamentsData.data)) {
-        setTournaments(tournamentsData.data);
-      } else {
-        console.error('API did not return an array of tournaments');
+    if (!selectedTournament || !championName) return undefined;
+    const victoryKey = `${selectedTournament}:${championName}`;
+    if (shownVictories.current.has(victoryKey)) return undefined;
+    shownVictories.current.add(victoryKey);
+
+    let active = true;
+    setVictory({ open: false, teamName: championName, members: [], loading: true });
+    const revealTimer = window.setTimeout(() => {
+      if (active) setVictory((current) => ({ ...current, open: true }));
+    }, 1050);
+
+    const loadWinningRoster = async () => {
+      try {
+        const response = await fetchTeamRoster(championName);
+        if (!active) return;
+        const roster = Array.isArray(response.data) ? response.data : [];
+        setVictory((current) => ({ ...current, teamName: championName, members: roster, loading: false }));
+      } catch (error) {
+        if (!active) return;
+        console.error('Could not load the winning roster:', error);
+        setVictory((current) => ({ ...current, teamName: championName, members: [], loading: false }));
       }
     };
-    fetchData();
-  }, []);
+    loadWinningRoster();
+    return () => { active = false; window.clearTimeout(revealTimer); };
+  }, [selectedTournament, championName]);
 
-  // Generate first-round matches, then load the bracket. If one already
-  // exists this is a destructive regenerate: confirm, then force=true so the
-  // backend wipes instead of stacking a duplicate round 1.
-  const handleGenerateBracket = async (tournamentName) => {
-    if (!tournamentName) return;
-    const hasBracket = bracketMatches.length > 0;
-    if (hasBracket) {
-      const ok = window.confirm(
-        'This tournament already has a bracket. Regenerating will delete all existing matches and reshuffle. Continue?'
-      );
-      if (!ok) return;
-    }
+  const selectTournament = (name) => {
+    setSelectedTournament(name);
+    setSelectedGame(tournaments.find((tournament) => tournament.name === name)?.game || '');
+    setBracketMatches([]);
+    setVictory((current) => ({ ...current, open: false }));
+    if (name) navigate(`/bracket/${encodeURIComponent(name)}`);
+  };
+
+  const replayVictory = () => {
+    setVictory((current) => ({ ...current, open: false }));
+    window.setTimeout(() => setVictory((current) => ({ ...current, open: true })), 140);
+  };
+
+  const generateBracket = async (force = false) => {
+    if (!selectedTournament) return;
+    setLoading(true);
+    setConfirmRegenerate(false);
     try {
-      await generateAndListMatches(tournamentName, hasBracket);
+      await generateAndListMatches(selectedTournament, force);
+      await loadBracket(selectedTournament);
+      setResultMessage({ severity: 'success', text: force ? 'Bracket regenerated with a new shuffle.' : 'Bracket generated successfully.' });
     } catch (error) {
-      console.error('Error generating matches:', error);
-    }
-    await loadBracket(tournamentName);
+      setResultMessage({ severity: 'error', text: getApiErrorMessage(error, 'The bracket could not be generated.') });
+    } finally { setLoading(false); }
   };
 
-  const handleRefresh = () => loadBracket(selectedTournament);
+  const requestGeneration = () => {
+    if (bracketMatches.length) setConfirmRegenerate(true);
+    else generateBracket(false);
+  };
 
-  // A node is recordable if it maps to a real db match, isn't decided, and
-  // both slots are filled (not TBD placeholders).
-  const isRecordable = (m) =>
-    m && m.dbMatchId && m.state !== 'DONE' &&
-    m.participants.every((p) => p.name && p.name !== 'TBD');
+  const isRecordable = (match) => match && match.dbMatchId
+    && !match.participants.some((participant) => participant.isWinner)
+    && match.participants.every((participant) => participant.name && participant.name !== 'TBD');
 
-  const handleMatchClick = ({ match }) => {
+  const handleMatchClick = (match) => {
     setResultMessage(null);
-    if (isRecordable(match)) setDialogMatch(match);
+    if (!isRecordable(match)) return;
+    if (!isAuthenticated) {
+      setResultMessage({ severity: 'info', text: 'Sign in to record a game result.' });
+      return;
+    }
+    setDialogMatch(match);
   };
 
-  const handleRecordGame = async (teamName) => {
+  const recordGame = async (teamName) => {
     if (!dialogMatch || !selectedTournament) return;
-    setIsRecording(true);
+    setRecording(true);
     try {
       const response = await recordMatchResult(selectedTournament, {
         match_number: dialogMatch.dbMatchId,
         winner_team_name: teamName,
       });
-      const message = response.data?.message || 'Result recorded.';
-      setResultMessage({ severity: 'success', text: message });
       setDialogMatch(null);
-      await loadBracket(selectedTournament);
+      await loadBracket(selectedTournament, { silent: true });
+      setResultMessage({ severity: 'success', text: response.data?.message || 'Game result recorded.' });
     } catch (error) {
-      const detail = error.response?.data?.detail || 'Failed to record result. Please try again.';
-      setResultMessage({ severity: 'error', text: detail });
-    } finally {
-      setIsRecording(false);
-    }
+      setResultMessage({ severity: 'error', text: getApiErrorMessage(error, 'The result could not be recorded.') });
+    } finally { setRecording(false); }
+  };
+
+  const enterFullscreen = async () => {
+    try { await containerRef.current?.requestFullscreen?.(); } catch (error) { console.error('Fullscreen unavailable:', error); }
   };
 
   return (
     <Box>
-      <FormControl fullWidth>
-        <InputLabel>Tournament</InputLabel>
-        <Select
-          label="Tournament"
-          value={tournament}
-          onChange={(e) => {
-            setTournament(e.target.value);
-            setSelectedTournament(e.target.value);
-          }}
-        >
-          {tournaments.map((t) =>
-            t ? (
-              <MenuItem key={t.id} value={t.name}>
-                {t.name}
-              </MenuItem>
-            ) : null
-          )}
-        </Select>
-      </FormControl>
+      <PageHeader eyebrow="Live competition" title="Tournament bracket"
+        description="Follow the full tournament path and record each game directly from its matchup."
+        actions={selectedTournament && <Button variant="outlined" startIcon={<FullscreenRounded />} onClick={enterFullscreen}>Full screen</Button>} />
 
-      <Stack direction="row" spacing={1} sx={{ my: 1.5 }}>
-        <Button
-          onClick={() => handleGenerateBracket(selectedTournament)}
-          disabled={!selectedTournament}
-        >
-          {bracketMatches.length > 0 ? 'Regenerate Bracket' : 'Generate Bracket'}
-        </Button>
-        <Button onClick={handleRefresh} disabled={!selectedTournament}>Refresh</Button>
-      </Stack>
-
-      {resultMessage && (
-        <Alert
-          severity={resultMessage.severity}
-          sx={{ mb: 2, whiteSpace: 'pre-line' }}
-          onClose={() => setResultMessage(null)}
-        >
-          {resultMessage.text}
-        </Alert>
-      )}
-
-      <Box ref={containerRef} sx={{ width: '100%' }}>
-        {isLoading && <Typography color="text.secondary">Loading bracket…</Typography>}
-        {!isLoading && selectedTournament && bracketMatches.length === 0 && (
-          <Typography color="text.secondary">
-            No matches found for this tournament — generate a bracket to get started.
-          </Typography>
+      <Card sx={{ mb: 3, p: { xs: 2, sm: 2.5 } }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
+          <FormControl sx={{ flex: 1, minWidth: { md: 300 } }}>
+            <InputLabel>Tournament</InputLabel>
+            <Select label="Tournament" value={selectedTournament} onChange={(event) => selectTournament(event.target.value)}>
+              {tournaments.map((tournament) => (
+                <MenuItem key={tournament.id} value={tournament.name}>
+                  <GameIcon game={tournament.game} size={26} sx={{ mr: 1.25, borderRadius: 1.25 }} />
+                  {tournament.name} · {tournament.format?.toUpperCase()}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Button variant="contained" startIcon={bracketMatches.length ? <AutorenewRounded /> : <AccountTreeRounded />}
+            disabled={!selectedTournament || !isAuthenticated || loading} onClick={requestGeneration}>
+            {bracketMatches.length ? 'Regenerate' : 'Generate bracket'}
+          </Button>
+          <Button variant="outlined" startIcon={<RefreshRounded />} disabled={!selectedTournament || loading} onClick={() => loadBracket(selectedTournament, { silent: true })}>Refresh</Button>
+        </Stack>
+        {!isAuthenticated && selectedTournament && (
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1.5, color: 'text.secondary' }}>
+            <LockOutlined sx={{ fontSize: 17 }} />
+            <Typography variant="caption">Spectator mode. <Button size="small" onClick={signIn} sx={{ minHeight: 0, p: 0.25 }}>Sign in</Button> to manage this bracket.</Typography>
+          </Stack>
         )}
-        {!isLoading && bracketMatches.length > 0 && (
-          <Box sx={{ border: '1px solid #E1E7E6', borderRadius: 2, overflow: 'hidden' }}>
-            <SingleEliminationBracket
-              matches={bracketMatches}
-              matchComponent={Match}
-              theme={bracketTheme}
-              options={{ style: { boxHeight: BOX_HEIGHT } }}
-              onMatchClick={handleMatchClick}
-              svgWrapper={({ children, ...props }) => (
-                <SVGViewer
-                  width={viewerWidth}
-                  height={viewerHeight}
-                  background={BRAND.canvas}
-                  SVGBackground={BRAND.canvas}
-                  {...props}
-                >
-                  {children}
-                </SVGViewer>
-              )}
-            />
-            <Typography variant="caption" sx={{ display: 'block', px: 1.5, py: 0.75, color: 'text.secondary' }}>
-              Click a match to record a game result · drag to pan, scroll to zoom
-              {contentWidth > viewerWidth ? ' (bracket is wider than the view)' : ''}
-            </Typography>
-          </Box>
+      </Card>
+
+      <Box sx={{ mb: 3 }}>
+        <GameUpdatePanel
+          compact
+          game={selectedGame}
+          {...bracketUpdate}
+          action={finalComplete && championName
+            ? { label: 'Replay champion moment', onClick: () => setVictory((current) => ({ ...current, open: true })) }
+            : !isAuthenticated && selectedTournament
+              ? { label: 'Sign in to score', onClick: signIn }
+              : undefined}
+        />
+      </Box>
+
+      {resultMessage && <Alert severity={resultMessage.severity} onClose={() => setResultMessage(null)} sx={{ mb: 2, whiteSpace: 'pre-line' }}>{resultMessage.text}</Alert>}
+
+      <Box ref={containerRef} sx={{ width: '100%', bgcolor: 'background.default', '&:fullscreen': { p: 2, overflow: 'auto' } }}>
+        {loading ? <Skeleton variant="rounded" height={520} /> : !selectedTournament ? (
+          <EmptyState icon={<AccountTreeRounded />} title="Choose a tournament" description="Select a competition above to load its bracket." />
+        ) : bracketMatches.length === 0 ? (
+          <EmptyState icon={<AccountTreeRounded />} title="No bracket generated" description="Register at least two teams, then generate the opening round."
+            action={isAuthenticated ? <Button variant="contained" startIcon={<AccountTreeRounded />} onClick={() => generateBracket(false)}>Generate bracket</Button> : null} />
+        ) : (
+          <ResponsiveBracket
+            key={selectedTournament}
+            matches={bracketMatches}
+            teamIcons={teamIcons}
+            onMatchClick={handleMatchClick}
+            finalComplete={finalComplete}
+          />
         )}
       </Box>
 
-      <Dialog open={!!dialogMatch} onClose={() => !isRecording && setDialogMatch(null)}>
-        <DialogTitle>Record game — {dialogMatch?.name}</DialogTitle>
+      <Dialog open={!!dialogMatch} onClose={() => !recording && setDialogMatch(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Record game result</DialogTitle>
         <DialogContent>
-          <Typography sx={{ mb: 1 }}>
-            {dialogMatch?.participants?.[0]?.name} vs {dialogMatch?.participants?.[1]?.name}
-            {' '}({dialogMatch?.participants?.[0]?.resultText ?? 0}–{dialogMatch?.participants?.[1]?.resultText ?? 0})
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Who won this game? One click records a single game in the series.
-          </Typography>
+          <Typography variant="h3">{dialogMatch?.participants?.[0]?.name} <Typography component="span" color="text.secondary">vs</Typography> {dialogMatch?.participants?.[1]?.name}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>Current series score: {dialogMatch?.participants?.[0]?.resultText ?? 0}–{dialogMatch?.participants?.[1]?.resultText ?? 0}. Choose the winner of this game.</Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 3 }}>
+            {dialogMatch?.participants?.map((participant) => (
+              <Button key={participant.name} fullWidth variant="outlined" size="large" disabled={recording} onClick={() => recordGame(participant.name)}>{participant.name} won</Button>
+            ))}
+          </Stack>
+          {recording && <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Recording result…</Typography></Stack>}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
-          <Button onClick={() => setDialogMatch(null)} disabled={isRecording}>Cancel</Button>
-          {dialogMatch?.participants?.map((p) => (
-            <Button
-              key={p.name}
-              variant="contained"
-              disabled={isRecording}
-              onClick={() => handleRecordGame(p.name)}
-            >
-              {p.name}
-            </Button>
-          ))}
-        </DialogActions>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}><Button onClick={() => setDialogMatch(null)} disabled={recording}>Cancel</Button></DialogActions>
       </Dialog>
+
+      <Dialog open={confirmRegenerate} onClose={() => setConfirmRegenerate(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Regenerate bracket?</DialogTitle>
+        <DialogContent><Typography color="text.secondary">This deletes every existing match and recorded score in <strong>{selectedTournament}</strong>, then creates a new random bracket.</Typography></DialogContent>
+        <DialogActions sx={{ p: 2.5, pt: 1 }}><Button onClick={() => setConfirmRegenerate(false)}>Cancel</Button><Button variant="contained" color="error" onClick={() => generateBracket(true)}>Regenerate</Button></DialogActions>
+      </Dialog>
+
+      <VictoryCelebration
+        open={victory.open}
+        onClose={() => setVictory((current) => ({ ...current, open: false }))}
+        onReplay={replayVictory}
+        teamName={victory.teamName}
+        tournamentName={selectedTournament}
+        members={victory.members}
+        loading={victory.loading}
+      />
     </Box>
   );
 };
 
-export default TournamentBracketComponent;
+export default TournamentBracket;

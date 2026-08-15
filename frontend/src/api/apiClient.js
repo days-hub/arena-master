@@ -1,87 +1,45 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:8000/api'; // Adjust according to your setup
+export const API_ORIGIN = (process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
 
-export const createTournament = async (tournamentData) => {
-  return axios.post(`${BASE_URL}/tournaments`, tournamentData);
-};
+const api = axios.create({
+  baseURL: `${API_ORIGIN}/api`,
+  withCredentials: true,
+  headers: { 'Content-Type': 'application/json' },
+});
 
-export const registerTeam = async (tournamentName, teamData) => {
-  return axios.post(`${BASE_URL}/tournaments/${encodeURIComponent(tournamentName)}/register`, teamData);
-};
+export const getApiErrorMessage = (error, fallback = 'Something went wrong. Please try again.') =>
+  error?.response?.data?.detail || error?.response?.data?.message || fallback;
 
-export const recordMatchResult = async (tournamentName, matchData) => {
-  return axios.post(`${BASE_URL}/tournaments/${encodeURIComponent(tournamentName)}/record_match_result`, matchData);
-};
+export const getDiscordLoginUrl = () => `${API_ORIGIN}/oauth2/authorization/discord`;
+export const fetchCurrentUser = () => api.get('/me');
+export const logout = () => api.post('/logout');
+export const createTournament = (data) => api.post('/tournaments', data);
+export const updateTournament = (id, data) => api.put(`/tournaments/${id}`, data);
+export const registerTeam = (name, data) => api.post(`/tournaments/${encodeURIComponent(name)}/register`, data);
+export const unregisterTeam = (id, teamName) => api.delete(`/tournaments/${id}/teams/${encodeURIComponent(teamName)}`);
+export const recordMatchResult = (name, data) => api.post(`/tournaments/${encodeURIComponent(name)}/record_match_result`, data);
+export const recordSubmatchResult = (name, data) => api.post(`/tournaments/${encodeURIComponent(name)}/record_submatch_result`, data);
+export const fetchTournaments = () => api.get('/tournaments');
+export const fetchTournamentsOverview = () => api.get('/tournaments/overview');
+export const fetchTournamentByName = (name) => api.get(`/tournaments/by_name/${encodeURIComponent(name)}`);
+export const deleteTournament = (id) => api.delete(`/tournaments/${id}`);
+export const generateAndListMatches = (name, force = false) =>
+  api.post(`/tournaments/${encodeURIComponent(name)}/generate_and_list_matches`, null, {
+    params: force ? { force: true } : {},
+  });
+export const fetchGames = () => api.get('/games');
+export const createTeam = (data) => api.post('/teams', data);
+export const fetchTeams = () => api.get('/teams');
+export const fetchTeamById = (id) => api.get(`/teams/${id}`);
+export const fetchTeamByName = (name) => api.get(`/teams/by_name/${encodeURIComponent(name)}`);
+export const fetchTeamRoster = (name) => api.get(`/teams/by_name/${encodeURIComponent(name)}/members`);
+export const updateTeam = (id, data) => api.put(`/teams/${id}`, data);
+export const updateTeamAvatar = (id, avatarUrl) => api.put(`/teams/${id}/avatar`, { avatar_url: avatarUrl });
+export const deleteTeam = (id) => api.delete(`/teams/${id}`);
+export const addMemberToTeam = (teamId, memberId) => api.post('/teams/add_member', { team_id: teamId, member_id: memberId });
+export const removeMemberFromTeam = (teamId, memberId) => api.delete(`/teams/${teamId}/members/${memberId}`);
+export const fetchDiscordMembers = () => api.get('/discord/members');
+export const fetchStandings = () => api.get('/standings');
 
-export const fetchTournaments = async () => {
-  return axios.get(`${BASE_URL}/tournaments`);
-};
-
-export const fetchTournamentByName = async (tournamentName) => {
-  return axios.get(`${BASE_URL}/tournaments/by_name/${encodeURIComponent(tournamentName)}`);
-};
-
-export const createTeam = async (teamData) => {
-  return axios.post(`${BASE_URL}/teams`, teamData);
-};
-
-export const fetchTeams = async () => {
-  return axios.get(`${BASE_URL}/teams`);
-};
-
-export const addMemberToTeam = async (teamId, memberId) => {
-  return axios.post(`${BASE_URL}/teams/add_member`, { team_id: teamId, member_id: memberId });
-};
-
-export const deleteTeam = async (teamId) => {
-  return axios.delete(`${BASE_URL}/teams/${teamId}`);
-};
-export const deleteTournament = async (tournamentId) => {
-  return axios.delete(`${BASE_URL}/tournaments/${tournamentId}`);
-};
-export const updateTeam = async (teamId, teamData) => {
-  return axios.put(`${BASE_URL}/teams/${teamId}`, teamData);
-};
-
-export const fetchTeamById = async (teamId) => {
-  return axios.get(`${BASE_URL}/teams/${teamId}`);
-};
-  
-export const fetchTeamByName = async (teamName) => {
-    return axios.get(`${BASE_URL}/teams/by_name/${encodeURIComponent(teamName)}`);
-};
-  
-export const generateAndListMatches = async (tournamentName, force = false) => {
-    return axios.post(`${BASE_URL}/tournaments/${encodeURIComponent(tournamentName)}/generate_and_list_matches`, null, {
-      params: force ? { force: true } : {},
-    });
-};
-  
-export const recordSubmatchResult = async (tournamentName, submatchData) => {
-    return axios.post(`${BASE_URL}/tournaments/${encodeURIComponent(tournamentName)}/record_submatch_result`, submatchData);
-};
-export const fetchDiscordMembers = async () => {
-  // Replace the URL with your actual endpoint for fetching Discord members
-  return axios.get(`${BASE_URL}/discord/members`);
-};
-export const sendWebhookMessage = async (message) => {
-  // Discord notifications are best-effort: a failed or unconfigured webhook should
-  // never break the user action that triggered it.
-  try {
-    return await axios.post(`${BASE_URL}/notify-discord`, { message });
-  } catch (error) {
-    console.error('Failed to send Discord notification:', error);
-    return null;
-  }
-};
-
-// You might need to adjust these functions to fit the exact data structure you're using in your application.
-
-export const fetchTournamentsOverview = async () => {
-  return axios.get(`${BASE_URL}/tournaments/overview`);
-};
-
-export const fetchStandings = async () => {
-  return axios.get(`${BASE_URL}/standings`);
-};
+export default api;

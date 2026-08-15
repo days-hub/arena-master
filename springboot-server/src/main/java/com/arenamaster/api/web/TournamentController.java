@@ -79,6 +79,11 @@ public class TournamentController {
         return service.register(tournamentName, request);
     }
 
+    @DeleteMapping("/api/tournaments/{id}/teams/{teamName}")
+    public Map<String, Object> unregister(@PathVariable Long id, @PathVariable String teamName) {
+        return service.unregister(id, teamName);
+    }
+
     @PostMapping("/api/tournaments/{tournamentName}/generate_and_list_matches")
     public Map<String, Object> generateAndListMatches(@PathVariable String tournamentName,
                                                       @RequestParam(defaultValue = "false") boolean force) {

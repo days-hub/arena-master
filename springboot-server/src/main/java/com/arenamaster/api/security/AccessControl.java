@@ -1,6 +1,7 @@
 package com.arenamaster.api.security;
 
 import com.arenamaster.api.domain.Tournament;
+import com.arenamaster.api.domain.Team;
 import com.arenamaster.api.domain.User;
 import com.arenamaster.api.error.ApiException;
 import org.springframework.stereotype.Component;
@@ -54,6 +55,21 @@ public class AccessControl {
         }
         if (!owner.getId().equals(user.getId())) {
             throw new ApiException(403, "Only the tournament's creator can do that");
+        }
+        return user;
+    }
+
+    /** Team artwork may be changed by a roster member or an administrator. */
+    public User requireCanManage(Team team) {
+        User user = requireUser();
+        if (user.isAdmin()) {
+            return user;
+        }
+        boolean isRosterMember = team.getMembers().stream()
+                .map(String::valueOf)
+                .anyMatch(user.getDiscordId()::equals);
+        if (!isRosterMember) {
+            throw new ApiException(403, "Only a team member or admin can edit this team");
         }
         return user;
     }

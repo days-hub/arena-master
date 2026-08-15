@@ -2,7 +2,9 @@ package com.arenamaster.api.web;
 
 import com.arenamaster.api.dto.AddMemberRequest;
 import com.arenamaster.api.dto.CreateTeamRequest;
+import com.arenamaster.api.dto.MemberView;
 import com.arenamaster.api.dto.TeamView;
+import com.arenamaster.api.dto.UpdateTeamAvatarRequest;
 import com.arenamaster.api.service.TeamService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,9 +50,19 @@ public class TeamController {
         return service.addMember(request);
     }
 
+    @DeleteMapping("/{teamId}/members/{memberId}")
+    public Map<String, String> removeMember(@PathVariable Long teamId, @PathVariable Long memberId) {
+        return service.removeMember(teamId, memberId);
+    }
+
     @GetMapping("/by_name/{teamName}")
     public TeamView byName(@PathVariable String teamName) {
         return service.getByName(teamName);
+    }
+
+    @GetMapping("/by_name/{teamName}/members")
+    public List<MemberView> rosterByName(@PathVariable String teamName) {
+        return service.getRosterByName(teamName);
     }
 
     @GetMapping("/{id}")
@@ -61,6 +73,11 @@ public class TeamController {
     @PutMapping("/{id}")
     public TeamView update(@PathVariable Long id, @RequestBody CreateTeamRequest request) {
         return service.update(id, request);
+    }
+
+    @PutMapping("/{id}/avatar")
+    public TeamView updateAvatar(@PathVariable Long id, @RequestBody UpdateTeamAvatarRequest request) {
+        return service.updateAvatar(id, request);
     }
 
     @DeleteMapping("/{id}")

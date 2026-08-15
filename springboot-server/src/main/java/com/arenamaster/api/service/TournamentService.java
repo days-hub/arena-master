@@ -2,6 +2,7 @@ package com.arenamaster.api.service;
 
 import com.arenamaster.api.domain.Match;
 import com.arenamaster.api.domain.Tournament;
+import com.arenamaster.api.domain.TournamentRegistration;
 import com.arenamaster.api.domain.User;
 import com.arenamaster.api.dto.GeneratedMatch;
 import com.arenamaster.api.dto.MatchResultRequest;
@@ -63,10 +64,12 @@ public class TournamentService {
 
     // ---------- CRUD ----------
 
+    @Transactional(readOnly = true)
     public List<TournamentResponse> list() {
         return tournaments.findAll(Sort.by("id")).stream().map(this::summaryResponse).toList();
     }
 
+    @Transactional(readOnly = true)
     public TournamentResponse get(Long id) {
         Tournament t = tournaments.findById(id)
                 .orElseThrow(() -> new ApiException(404, "Tournament not found"));
@@ -95,21 +98,30 @@ public class TournamentService {
         }
         announce("A new tournament \"%s\" has been created for %s in %s format."
                 .formatted(name, t.getGame(), t.getFormat()));
-        return new TournamentResponse(t.getId(), name, t.getGame(), t.getFormat(), List.of(), List.of());
+        return new TournamentResponse(t.getId(), name, t.getGame(), t.getFormat(), t.getStatus(), List.of(), List.of());
     }
 
     @Transactional
     public TournamentResponse update(Long id, TournamentCreateRequest request) {
-        // Legacy: no 404 here — updating a missing id was a silent no-op that
-        // still echoed the request back.
-        tournaments.findById(id).ifPresent(t -> {
-            access.requireCanManage(t);
-            t.setName(request.name());
-            t.setGame(request.game());
-            t.setFormat(request.formatOrDefault());
-        });
-        return new TournamentResponse(id, request.name(), request.game(), request.formatOrDefault(),
-                List.of(), List.of());
+        Tournament t = tournaments.findById(id)
+                .orElseThrow(() -> new ApiException(404, "Tournament not found"));
+        access.requireCanManage(t);
+        String name = request.name() == null ? "" : request.name().strip();
+        if (name.isEmpty()) {
+            throw new ApiException(400, "Tournament name cannot be empty.");
+        }
+        if (tournaments.existsByNameAndStatusInAndIdNot(name, ACTIVE_STATUSES, id)) {
+            throw new ApiException(400, "Another active tournament already uses that name.");
+        }
+        String format = request.formatOrDefault();
+        if (!matches.findByTournamentIdOrderById(id).isEmpty() && !format.equals(t.getFormat())) {
+            throw new ApiException(400, "Series format cannot change after bracket generation.");
+        }
+        t.setName(name);
+        t.setGame(request.game());
+        t.setFormat(format);
+        announce("Tournament \"%s\" details were updated.".formatted(name));
+        return summaryResponse(t);
     }
 
     @Transactional
@@ -142,6 +154,24 @@ public class TournamentService {
                 .formatted(request.teamName(), tournamentName));
     }
 
+    @Transactional
+    public Map<String, Object> unregister(Long tournamentId, String teamName) {
+        Tournament t = tournaments.findById(tournamentId)
+                .orElseThrow(() -> new ApiException(404, "Tournament not found"));
+        access.requireCanManage(t);
+        String message = dropTeam(t, teamName);
+        announce(message);
+        return Map.of("message", message, "tournament", summaryResponse(t));
+    }
+
+    /** Internal cleanup used when a reusable team is deleted. */
+    @Transactional
+    public void dropDeletedTeam(String teamName) {
+        tournaments.findAll(Sort.by("id")).stream()
+                .filter(t -> ACTIVE_STATUSES.contains(t.getStatus()) && t.hasTeam(teamName))
+                .forEach(t -> announce(dropTeam(t, teamName)));
+    }
+
     // ---------- Bracket views ----------
 
     @Transactional(readOnly = true)
@@ -150,7 +180,7 @@ public class TournamentService {
         List<MatchView> views = matches.findByTournamentIdOrderById(t.getId()).stream()
                 .map(this::toMatchView)
                 .toList();
-        return new TournamentResponse(t.getId(), t.getName(), t.getGame(), t.getFormat(),
+        return new TournamentResponse(t.getId(), t.getName(), t.getGame(), t.getFormat(), t.getStatus(),
                 t.teamNames(), views);
     }
 
@@ -212,12 +242,7 @@ public class TournamentService {
         match.setTeamBScore(scoreB);
         match.setEndTime(LocalDateTime.now().format(SQL_TIMESTAMP));
 
-        int winningScore = switch (t.getFormat()) {
-            case "bo3" -> 2;
-            case "bo5" -> 3;
-            case "bo7" -> 4;
-            default -> 1; // bo1
-        };
+        int winningScore = winningScore(t.getFormat());
         String winner = null;
         if (scoreA == winningScore) {
             winner = match.getTeamA();
@@ -226,6 +251,7 @@ public class TournamentService {
         }
         if (winner != null) {
             match.setWinner(winner);
+            match.setState("DONE");
         }
 
         String message = winner == null
@@ -258,12 +284,16 @@ public class TournamentService {
             return response;
         }
 
-        List<GeneratedMatch> nextRound = createRound(t, nextRoundNumber, nextRoundTeams).stream()
+        List<Match> nextRoundMatches = createRound(t, nextRoundNumber, nextRoundTeams);
+        List<GeneratedMatch> nextRound = nextRoundMatches.stream()
                 .map(this::toGeneratedMatch)
                 .toList();
         message += "\n\nNext round matches generated:\n" + nextRound.stream()
                 .map(m -> "Match %d: %s vs %s".formatted(m.matchId(), m.teamA(), m.teamB()))
                 .collect(Collectors.joining("\n"));
+        if (nextRoundMatches.stream().allMatch(matchInNextRound -> hasWinner(matchInNextRound.getWinner()))) {
+            message = advanceCompletedRound(t, nextRoundNumber, message);
+        }
         announce(message);
         response.put("message", message);
         response.put("next_round_matches", nextRound);
@@ -354,6 +384,85 @@ public class TournamentService {
                 .orElseThrow(() -> new ApiException(404, detail));
     }
 
+    private String dropTeam(Tournament t, String teamName) {
+        TournamentRegistration registration = t.getRegistrations().stream()
+                .filter(entry -> entry.getTeamName().equals(teamName))
+                .findFirst()
+                .orElseThrow(() -> new ApiException(404, "Team is not registered for this tournament"));
+        t.getRegistrations().remove(registration);
+        for (int index = 0; index < t.getRegistrations().size(); index++) {
+            t.getRegistrations().get(index).setSeedOrder(index);
+        }
+
+        String message = "Team \"%s\" was removed from tournament \"%s\"."
+                .formatted(teamName, t.getName());
+        if (!"Ongoing".equals(t.getStatus())) {
+            return message;
+        }
+
+        List<Match> tournamentMatches = matches.findByTournamentIdOrderById(t.getId());
+        Match activeMatch = tournamentMatches.stream()
+                .filter(match -> !hasWinner(match.getWinner()))
+                .filter(match -> teamName.equals(match.getTeamA()) || teamName.equals(match.getTeamB()))
+                .findFirst()
+                .orElse(null);
+        if (activeMatch == null) {
+            return message + " No active match required a forfeit.";
+        }
+
+        String opponent = teamName.equals(activeMatch.getTeamA())
+                ? activeMatch.getTeamB()
+                : activeMatch.getTeamA();
+        awardForfeit(t, activeMatch, opponent);
+        message += " %s advances by forfeit in Match %d."
+                .formatted(opponent, activeMatch.getMatchNumber());
+        return advanceCompletedRound(t, activeMatch.getRoundNumber(), message);
+    }
+
+    private void awardForfeit(Tournament t, Match match, String winner) {
+        int score = winningScore(t.getFormat());
+        if (winner.equals(match.getTeamA())) {
+            match.setTeamAScore(Math.max(match.getTeamAScore(), score));
+        } else {
+            match.setTeamBScore(Math.max(match.getTeamBScore(), score));
+        }
+        match.setWinner(winner);
+        match.setState("FORFEIT");
+        match.setEndTime(LocalDateTime.now().format(SQL_TIMESTAMP));
+    }
+
+    private String advanceCompletedRound(Tournament t, int roundNumber, String message) {
+        List<Match> all = matches.findByTournamentIdOrderById(t.getId());
+        List<Match> roundMatches = all.stream()
+                .filter(match -> match.getRoundNumber() == roundNumber)
+                .toList();
+        if (roundMatches.isEmpty() || roundMatches.stream().anyMatch(match -> !hasWinner(match.getWinner()))) {
+            return message;
+        }
+
+        List<String> winners = roundMatches.stream().map(Match::getWinner).toList();
+        if (winners.size() == 1) {
+            t.setStatus("Completed");
+            return message + " Tournament complete—%s is the champion.".formatted(winners.get(0));
+        }
+
+        int nextRoundNumber = all.stream().mapToInt(Match::getRoundNumber).max().orElse(0) + 1;
+        List<Match> nextRound = createRound(t, nextRoundNumber, winners);
+        String nextMessage = message + " Round %d is ready.".formatted(nextRoundNumber);
+        return nextRound.stream().allMatch(match -> hasWinner(match.getWinner()))
+                ? advanceCompletedRound(t, nextRoundNumber, nextMessage)
+                : nextMessage;
+    }
+
+    private static int winningScore(String format) {
+        return switch (format) {
+            case "bo3" -> 2;
+            case "bo5" -> 3;
+            case "bo7" -> 4;
+            default -> 1;
+        };
+    }
+
     private List<Match> createRound(Tournament t, int roundNumber, List<String> teams) {
         List<Match> created = new ArrayList<>();
         for (int i = 0; i + 1 < teams.size(); i += 2) {
@@ -365,6 +474,11 @@ public class TournamentService {
             m = matches.save(m);
             // Legacy quirk: match_number mirrors the row id.
             m.setMatchNumber(m.getId().intValue());
+            boolean teamARegistered = t.hasTeam(m.getTeamA());
+            boolean teamBRegistered = t.hasTeam(m.getTeamB());
+            if (teamARegistered != teamBRegistered) {
+                awardForfeit(t, m, teamARegistered ? m.getTeamA() : m.getTeamB());
+            }
             created.add(m);
         }
         return created;
@@ -388,8 +502,8 @@ public class TournamentService {
 
     private TournamentResponse summaryResponse(Tournament t) {
         // teams/matches deliberately empty — see TournamentResponse javadoc.
-        return new TournamentResponse(t.getId(), t.getName(), t.getGame(), t.getFormat(),
-                List.of(), List.of());
+        return new TournamentResponse(t.getId(), t.getName(), t.getGame(), t.getFormat(), t.getStatus(),
+                t.teamNames(), List.of());
     }
 
     private GeneratedMatch toGeneratedMatch(Match m) {

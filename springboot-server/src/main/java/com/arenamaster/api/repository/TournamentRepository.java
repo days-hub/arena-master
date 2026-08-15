@@ -20,4 +20,6 @@ public interface TournamentRepository extends JpaRepository<Tournament, Long> {
     /** The "no duplicate active tournament name" pre-check (the DB's partial
      * unique index is the real enforcement; this gives the friendly 400). */
     boolean existsByNameAndStatusIn(String name, Collection<String> statuses);
+
+    boolean existsByNameAndStatusInAndIdNot(String name, Collection<String> statuses, Long id);
 }

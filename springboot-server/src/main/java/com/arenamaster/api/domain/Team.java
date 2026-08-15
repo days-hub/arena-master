@@ -43,4 +43,7 @@ public class Team {
     private List<Long> members = new ArrayList<>();
 
     private String avatarUrl;
+
+    @Column(nullable = false)
+    private boolean avatarCustom;
 }

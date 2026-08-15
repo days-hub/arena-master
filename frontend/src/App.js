@@ -4,16 +4,17 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import theme from './theme';
 import Layout from './Layout';
+import { AuthProvider } from './auth/AuthContext';
 
-const App = () => {
-  return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Router>
+const App = () => (
+  <ThemeProvider theme={theme}>
+    <CssBaseline />
+    <Router>
+      <AuthProvider>
         <Layout />
-      </Router>
-    </ThemeProvider>
-  );
-};
+      </AuthProvider>
+    </Router>
+  </ThemeProvider>
+);
 
 export default App;
