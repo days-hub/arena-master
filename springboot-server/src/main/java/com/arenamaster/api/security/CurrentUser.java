@@ -2,6 +2,7 @@ package com.arenamaster.api.security;
 
 import com.arenamaster.api.domain.User;
 import com.arenamaster.api.repository.UserRepository;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -24,8 +25,10 @@ public class CurrentUser {
 
     public Optional<User> get() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() instanceof String) {
-            // "anonymousUser" principal — not logged in.
+        // Test the token type, not the principal type: the bot's service-key
+        // authentication also carries a String principal (the Discord id), so
+        // a principal-based check would treat every bot request as anonymous.
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
             return Optional.empty();
         }
         return users.findByDiscordId(auth.getName());

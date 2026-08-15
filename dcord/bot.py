@@ -20,6 +20,23 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 API_BASE_URL = "http://localhost:8000"
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+SERVICE_KEY = os.getenv("ARENA_SERVICE_KEY", "")
+
+
+def api_client(ctx):
+    """An HTTP client that authenticates as the person who typed the command.
+
+    The service key proves the request came from the bot; the acting-user
+    header tells the API whose permissions to apply, so !record_match_result
+    obeys the same ownership rules as clicking the bracket in the web UI. A
+    key that authenticated the bot alone would make everyone in the channel
+    an administrator.
+    """
+    headers = {}
+    if SERVICE_KEY:
+        headers["X-Service-Key"] = SERVICE_KEY
+        headers["X-Acting-User"] = str(ctx.author.id)
+    return httpx.AsyncClient(headers=headers)
 # Connect to the SQLite database
 conn = sqlite3.connect('../shared/database/arena_master.db')
 c = conn.cursor()
@@ -117,7 +134,7 @@ teams = {}
 async def create_team(ctx, *, team_name: str):
     # Step 1: Create the team in the database via FastAPI
     team_data = {"name": team_name, "members": []}  # API's expected payload
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             # This posts to the endpoint that creates a new team entity in database
             response = await client.post(f"{API_BASE_URL}/api/teams", json=team_data)
@@ -161,7 +178,7 @@ async def create_team(ctx, *, team_name: str):
 @bot.command(name='add_to_team', help="Adds a specified member to a team. Usage: !add_to_team 'Team Name' @Member")
 async def add_to_team(ctx, team_name: str, member: discord.Member):
     member_data = {"team_name": team_name, "member_id": member.id}
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             response = await client.post(f"{API_BASE_URL}/api/teams/add_member", json=member_data)
             response.raise_for_status()
@@ -180,7 +197,7 @@ async def add_to_team(ctx, team_name: str, member: discord.Member):
 @bot.command(name='delete_team', help="Deletes the specified team and its channels. Usage: !delete_team 'Team Name'")
 @commands.has_permissions(manage_guild=True)
 async def delete_team(ctx, *, team_name: str):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             # Fetch the team by name to get its ID
             fetch_response = await client.get(f"{API_BASE_URL}/api/teams/by_name/{team_name}")
@@ -226,7 +243,7 @@ games = ['Valorant', 'Mario Kart', 'Overwatch', 'Fortnite', 'League of Legends',
 
 @bot.command(name='create_tournament', help="Guides through creating a new tournament.")
 async def create_tournament(ctx: commands.Context):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             games_response = await client.get(f"{API_BASE_URL}/api/games")
             games_response.raise_for_status()
@@ -298,7 +315,7 @@ async def create_tournament(ctx: commands.Context):
 
 @bot.command(name='register_team', help="Registers a team for a tournament. Usage: !register_team 'Team Name' 'Tournament Name'")
 async def register_team(ctx, team_name: str, tournament_name: str):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             response = await client.post(f"{API_BASE_URL}/api/tournaments/{tournament_name}/register", json={"team_name": team_name})
             response.raise_for_status()
@@ -313,7 +330,7 @@ async def register_team(ctx, team_name: str, tournament_name: str):
 
 @bot.command(name='generate_matches', help="Generates and lists matches for the tournament.")
 async def generate_matches(ctx, tournament_name: str):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             response = await client.post(f"{API_BASE_URL}/api/tournaments/{tournament_name}/generate_and_list_matches")
             response.raise_for_status()
@@ -336,7 +353,7 @@ async def generate_matches(ctx, tournament_name: str):
 
 @bot.command(name='bracket', help="Posts a link to the tournament's live bracket page. Usage: !bracket 'Tournament Name'")
 async def bracket(ctx, *, tournament_name: str):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             response = await client.get(f"{API_BASE_URL}/api/tournaments/by_name/{tournament_name}")
             response.raise_for_status()
@@ -383,7 +400,7 @@ async def bracket(ctx, *, tournament_name: str):
 @bot.command(name='list_teams')
 async def list_teams(ctx, tournament_name: str):
     # Assuming an endpoint or method to fetch tournament details including teams
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         response = await client.get(f"{API_BASE_URL}/api/tournaments/by_name/{tournament_name}")
         if response.status_code == 200:
             tournament_data = response.json()
@@ -402,7 +419,7 @@ async def list_teams(ctx, tournament_name: str):
 
 @bot.command(name='record_match_result', help="Records the result of a match. Usage: !record_match_result 'Tournament Name' 'Match Number' 'Winner Team Name'")
 async def record_match_result(ctx, tournament_name: str, match_number: int, winner_team_name: str):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             response = await client.post(
                 f"{API_BASE_URL}/api/tournaments/{tournament_name}/record_match_result",
@@ -427,7 +444,7 @@ async def record_match_result(ctx, tournament_name: str, match_number: int, winn
   # Send the new round announcement if there is one
 @bot.command(name='record_submatch_result', help="Records the result of a submatch. Usage: !record_submatch_result 'Tournament Name' 'Match Number' 'Winning Team Name'")
 async def record_submatch_result(ctx, tournament_name: str, match_number: int, winner_team_name: str):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             response = await client.post(
                  f"{API_BASE_URL}/api/tournaments/{tournament_name}/record_submatch_result",
@@ -456,7 +473,7 @@ async def record_submatch_result(ctx, tournament_name: str, match_number: int, w
 
 @bot.command(name='games')
 async def list_games(ctx):
-    async with httpx.AsyncClient() as client:
+    async with api_client(ctx) as client:
         try:
             response = await client.get(f"{API_BASE_URL}/api/games")
             response.raise_for_status()  # Check for HTTP errors

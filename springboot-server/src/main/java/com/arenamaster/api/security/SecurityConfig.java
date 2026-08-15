@@ -3,6 +3,8 @@ package com.arenamaster.api.security;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -25,11 +27,26 @@ public class SecurityConfig {
 
     private final DiscordOAuth2UserService discordUserService;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrations;
+    private final ServiceKeyAuthFilter serviceKeyAuthFilter;
 
     public SecurityConfig(DiscordOAuth2UserService discordUserService,
-                          ObjectProvider<ClientRegistrationRepository> clientRegistrations) {
+                          ObjectProvider<ClientRegistrationRepository> clientRegistrations,
+                          ServiceKeyAuthFilter serviceKeyAuthFilter) {
         this.discordUserService = discordUserService;
         this.clientRegistrations = clientRegistrations;
+        this.serviceKeyAuthFilter = serviceKeyAuthFilter;
+    }
+
+    /**
+     * Boot registers every Filter bean in the main servlet chain as well;
+     * disable that so the filter runs only where it's placed below, inside
+     * the security chain.
+     */
+    @Bean
+    public FilterRegistrationBean<ServiceKeyAuthFilter> disableAutoRegistration(ServiceKeyAuthFilter filter) {
+        FilterRegistrationBean<ServiceKeyAuthFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean
@@ -40,6 +57,9 @@ public class SecurityConfig {
         successHandler.setAlwaysUseDefaultTargetUrl(true);
 
         http
+                // Runs before the session is consulted, so the bot's key
+                // authenticates the request without needing a cookie.
+                .addFilterBefore(serviceKeyAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 // Picks up the MVC CORS config in WebConfig.
                 .cors(Customizer.withDefaults())
                 // Stateless-style API consumed by a separate origin and by the
