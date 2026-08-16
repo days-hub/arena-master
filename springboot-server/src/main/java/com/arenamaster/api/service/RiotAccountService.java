@@ -12,6 +12,7 @@ import com.arenamaster.api.security.AccessControl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClientException;
 
 import java.time.Instant;
 import java.util.List;
@@ -90,6 +91,17 @@ public class RiotAccountService {
         }
 
         RiotClient.RiotAccountSummary summary = riot.resolveRiotId(gameName, tagLine, platform);
+
+        // Riot IDs are global — any regional host resolves any account — but
+        // rank lives on a specific platform. Without this check, choosing the
+        // wrong region links successfully and then shows a blank profile
+        // forever, with nothing to explain why.
+        RiotClient.RiotSummoner summoner = riot.fetchSummoner(summary.puuid(), platform);
+        if (summoner == null) {
+            throw new ApiException(404,
+                    "\"%s#%s\" exists, but has never played on %s. Check the region is right."
+                            .formatted(summary.gameName(), summary.tagLine(), platform.toUpperCase(Locale.ROOT)));
+        }
 
         // One Riot account per person: claiming an account someone else has
         // already linked would let two users present the same identity.
@@ -171,7 +183,9 @@ public class RiotAccountService {
             account.setWins(rank == null ? null : rank.wins());
             account.setLosses(rank == null ? null : rank.losses());
             account.setLastSyncedAt(Instant.now());
-        } catch (ApiException e) {
+        } catch (ApiException | RestClientException e) {
+            // Includes response bodies that don't match the documented shape:
+            // a stale rank beats failing the whole request.
             log.warn("Could not refresh Riot profile for {}: {}", account.riotId(), e.getMessage());
         }
     }

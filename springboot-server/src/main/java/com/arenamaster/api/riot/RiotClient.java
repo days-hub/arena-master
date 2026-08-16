@@ -103,7 +103,13 @@ public class RiotClient {
                         .formatted(platform), puuid)
                 .header("X-Riot-Token", props.apiKey())
                 .retrieve()
-                .onStatus(HttpStatusCode::isError, (req, res) -> translate(res.getStatusCode().value(), null))
+                // Must throw, not return: ErrorHandler#handle is void, so
+                // `(req, res) -> translate(...)` would build the exception and
+                // silently discard it, leaving Riot's error body to be parsed
+                // as if it were data.
+                .onStatus(HttpStatusCode::isError, (req, res) -> {
+                    throw translate(res.getStatusCode().value(), null);
+                })
                 .body(new ParameterizedTypeReference<>() {
                 });
         if (entries == null) {
@@ -127,8 +133,9 @@ public class RiotClient {
                     .uri(uriTemplate, vars)
                     .header("X-Riot-Token", props.apiKey())
                     .retrieve()
-                    .onStatus(HttpStatusCode::isError,
-                            (req, res) -> translate(res.getStatusCode().value(), notFoundMessage))
+                    .onStatus(HttpStatusCode::isError, (req, res) -> {
+                        throw translate(res.getStatusCode().value(), notFoundMessage);
+                    })
                     .body(new ParameterizedTypeReference<>() {
                     });
         } catch (RestClientException e) {

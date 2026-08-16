@@ -74,6 +74,10 @@ public class SecurityConfig {
                                 "/", "/api/games", "/api/tournaments/**", "/api/standings",
                                 "/api/teams", "/api/teams/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+                        // Spring forwards unhandled exceptions to /error. That
+                        // dispatch skips the auth filters, so securing it turns
+                        // every server error into a misleading empty 401.
+                        .requestMatchers("/error").permitAll()
                         // Lets the UI decide whether to offer League features
                         // before anyone has signed in.
                         .requestMatchers(HttpMethod.GET, "/api/riot/status").permitAll()
