@@ -4,15 +4,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
+/**
+ * Note there is deliberately no mapping for "/". The FastAPI backend answered
+ * it with {"message": "Hello World"} and the port reproduced that, but a
+ * controller wins over static resources — so in the packaged image it served
+ * that JSON to anyone opening the site instead of the app. The React shell
+ * owns "/" now.
+ */
 @RestController
 public class RootController {
-
-    @GetMapping("/")
-    public Map<String, String> root() {
-        return Map.of("message", "Hello World");
-    }
 
     @GetMapping("/api/games")
     public List<String> listGames() {
