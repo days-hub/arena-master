@@ -1,52 +1,69 @@
 # Deploying Arena Master to AWS
 
-A single EC2 instance runs the app, its PostgreSQL database, and Caddy for TLS,
-all through Docker Compose. GitHub Actions builds the image and rolls it out on
-every push to `main`.
+```
+arena.bortle.app
+       │
+   CloudFront          TLS (free ACM cert), CDN, DDoS protection
+       │
+      EC2  t4g.small
+       │
+  Docker Compose
+   ├─ nginx / React     serves the bundle, proxies /api to the backend
+   ├─ Spring Boot       the API
+   └─ PostgreSQL        EBS-backed volume
+```
+
+GitHub Actions builds both images, publishes them to GHCR, and rolls them out
+on every push to `main`.
 
 ## Why this shape
 
-App Runner was the obvious first choice, and it doesn't survive contact with the
-networking. Reaching a private RDS instance requires a VPC connector, and
-attaching one routes *all* the service's outbound traffic through your VPC — so
-the calls to Discord for OAuth and to Riot for ranks would need a NAT Gateway at
-roughly $32/month, more than the rest of the stack combined. The alternative,
-leaving RDS publicly reachable, means a database on the open internet, since App
-Runner has no fixed egress IPs to restrict a security group to.
+**One instance, several containers.** EC2 bills for the instance, not for what
+runs inside it, so there is no saving in cramming everything into one image —
+only a loss of separation. nginx serves static files far better than a JVM, and
+a frontend change no longer rebuilds the backend.
 
-One instance running Compose avoids the NAT, avoids a load balancer at ~$16/month,
-and is close to what runs on a laptop. The trade is real: you own patching and
-backups, and there is no redundancy. For a project of this size that is the right
-trade; at meaningful traffic it would not be.
+**nginx is the only public entry point** and proxies `/api`, `/oauth2`,
+`/login` and `/actuator` to Spring Boot. The browser sees a single origin, so
+there is no CORS to configure and no cross-site cookie handling.
+
+**App Runner was the first choice and doesn't survive the networking.** Reaching
+a private RDS needs a VPC connector, and attaching one routes *all* outbound
+traffic through your VPC — so the calls to Discord for OAuth and Riot for ranks
+would need a NAT Gateway at roughly $32/month, more than the rest of the stack
+combined.
+
+**CloudFront terminates TLS**, which removes Let's Encrypt, certificate renewal
+and a reverse-proxy container from the picture. Its 1 TB/month free tier is
+permanent rather than a 12-month trial.
 
 | Component | Choice | ~Monthly |
 | --------- | ------ | -------- |
-| Compute | EC2 `t4g.small` (2 vCPU, 2 GB, ARM) | ~$12 |
-| Database | PostgreSQL 18 container on the same box | $0 |
-| TLS | Caddy with Let's Encrypt | $0 |
-| Registry | GitHub Container Registry | $0 (public repo) |
+| CDN + TLS | CloudFront + ACM certificate | $0 (free tier) |
+| Compute | EC2 `t4g.small` (2 vCPU, 2 GB, ARM) | ~$12.26 |
 | Storage | 20 GB gp3 root volume | ~$1.60 |
+| Database | PostgreSQL 18 container on the same box | $0 |
+| Registry | GitHub Container Registry | $0 (public repo) |
 
-Roughly **$14/month**, so $200 of account credits covers the full six months.
+About **$14/month**, so the $100 of credits a new account starts with covers the
+full six months.
+
+Moving Postgres to RDS later is a `SPRING_DATASOURCE_URL` change plus a dump and
+restore — roughly +$15/month for automated backups and point-in-time recovery.
 
 ## Prerequisites
 
-- An AWS account (new accounts get $100 credits, up to $200 by completing the
-  onboarding tasks — do them, it doubles your runway)
-- **A domain name.** Let's Encrypt will not issue certificates for
-  `*.amazonaws.com`, and Discord requires HTTPS for any non-localhost OAuth
-  redirect. A `.com` costs about $12/year; a free DuckDNS subdomain also works.
-- The Discord and Riot credentials already in your local `.env`
+- An AWS account, with a **zero-spend budget alert set before anything else**
+- A hostname you control — this guide assumes `arena.bortle.app`
+- The Discord and Riot credentials from your local `.env`
 
 ---
 
-## 1. Set a billing alert first
+## 1. Set a billing alert
 
-Before creating anything billable. **Billing and Cost Management → Budgets →
-Create budget → Zero spend budget**, with your email address.
-
-Two minutes, and it is the difference between noticing a mistake on day one and
-noticing it on the invoice.
+**Billing and Cost Management → Budgets → Create budget → Zero spend budget**,
+with your email. Two minutes, and it is the difference between noticing a
+mistake on day one and noticing it on the invoice.
 
 ## 2. Launch the instance
 
@@ -57,43 +74,33 @@ noticing it on the invoice.
 | Name | `arena-master` |
 | AMI | Amazon Linux 2023 (**Arm** variant) |
 | Instance type | `t4g.small` |
-| Key pair | Create one, download the `.pem`, keep it safe |
+| Key pair | Create one, download the `.pem` |
 | Storage | 20 GB gp3 |
 
-Under **Network settings → Edit**, create a security group allowing:
+Security group:
 
 | Type | Port | Source | Why |
 | ---- | ---- | ------ | --- |
-| SSH | 22 | **My IP** | Administration. Not `0.0.0.0/0` |
-| HTTP | 80 | Anywhere | Let's Encrypt's challenge, and the redirect to HTTPS |
-| HTTPS | 443 | Anywhere | The site |
+| SSH | 22 | **My IP** | Administration. Never `0.0.0.0/0` |
+| HTTP | 80 | *see below* | CloudFront reaches the origin |
 
-Nothing opens 5432. The database is only reachable on the Compose network.
+Leave HTTP open to anywhere for now; step 5 locks it to CloudFront. Nothing ever
+opens 5432 or 8000 — the database and API are only reachable on the compose
+network.
 
-Then **Elastic IP → Allocate → Associate** with the instance, so the address
-survives a reboot. An Elastic IP is free while attached to a running instance
-and charged when it is not.
+Then **Elastic IP → Allocate → Associate**. Free while attached to a running
+instance, charged when it is not.
 
-## 3. Point DNS at it
-
-Create an `A` record for your domain pointing at the Elastic IP. Verify before
-continuing, because Caddy will fail to get a certificate otherwise:
+## 3. Install Docker
 
 ```bash
-dig +short your-domain.com     # should print the Elastic IP
-```
-
-## 4. Install Docker
-
-```bash
-ssh -i arena-master.pem ec2-user@your-domain.com
+ssh -i arena-master.pem ec2-user@<elastic-ip>
 
 sudo dnf update -y
 sudo dnf install -y docker
 sudo systemctl enable --now docker
 sudo usermod -aG docker ec2-user
 
-# Compose v2 as a CLI plugin
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
 sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
@@ -102,23 +109,22 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 exit   # log back in so the docker group applies
 ```
 
-## 5. Configure the stack
+## 4. Configure and start the stack
 
 ```bash
 mkdir -p ~/arena-master && cd ~/arena-master
 ```
 
-Copy `deploy/compose.prod.yaml` and `deploy/Caddyfile` from the repository into
-that directory, then create `.env` beside them:
+Copy `deploy/compose.prod.yaml` from the repository here, then create `.env`:
 
 ```bash
 cat > .env <<'EOF'
-ARENA_DOMAIN=your-domain.com
-ARENA_IMAGE=ghcr.io/days-hub/arena-master:latest
-
 POSTGRES_DB=arenamaster
 POSTGRES_USER=arena
-POSTGRES_PASSWORD=<generate a long random password>
+POSTGRES_PASSWORD=<generate>
+
+BACKEND_IMAGE=ghcr.io/days-hub/arena-master-backend:latest
+FRONTEND_IMAGE=ghcr.io/days-hub/arena-master-frontend:latest
 
 DISCORD_CLIENT_ID=...
 DISCORD_CLIENT_SECRET=...
@@ -127,7 +133,7 @@ DISCORD_GUILD_ID=...
 DISCORD_WEBHOOK_URL=...
 ADMIN_DISCORD_IDS=...
 
-ARENA_SERVICE_KEY=<generate a fresh one, do not reuse the local value>
+ARENA_SERVICE_KEY=<generate>
 RIOT_API_KEY=...
 RIOT_PLATFORM=na1
 EOF
@@ -135,14 +141,65 @@ EOF
 chmod 600 .env
 ```
 
-Generate secrets rather than copying the development ones:
+Generate the two secrets rather than copying the development ones — a secret
+that has lived on a laptop should not become a production credential:
 
 ```bash
-openssl rand -base64 36    # once for POSTGRES_PASSWORD, once for ARENA_SERVICE_KEY
+openssl rand -base64 36
 ```
 
-A development secret that has lived on a laptop should not become a production
-credential.
+The GHCR packages default to private. Make both public under
+**Packages → Package settings → Change visibility**, or the instance cannot
+pull them.
+
+```bash
+docker compose -f compose.prod.yaml up -d
+docker compose -f compose.prod.yaml logs -f backend
+```
+
+Flyway creates the schema on first boot. Watch for
+`Started ArenaMasterApiApplication`, then confirm the origin works over plain
+HTTP before putting CloudFront in front of it:
+
+```bash
+curl http://<elastic-ip>/actuator/health
+```
+
+## 5. Put CloudFront in front
+
+**Request the certificate first, in `us-east-1`** — CloudFront only accepts
+certificates from that region regardless of where the instance lives.
+
+**ACM (us-east-1) → Request public certificate** for `arena.bortle.app`, then
+add the CNAME it gives you to the `bortle.app` DNS and wait for *Issued*.
+
+**CloudFront → Create distribution**
+
+| Setting | Value |
+| ------- | ----- |
+| Origin domain | the Elastic IP or the instance's public DNS |
+| Protocol | **HTTP only** (TLS ends at CloudFront) |
+| Viewer protocol policy | **Redirect HTTP to HTTPS** |
+| Allowed methods | **GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE** |
+| Cache policy | **CachingDisabled** |
+| Origin request policy | **AllViewer** |
+| Alternate domain name | `arena.bortle.app` |
+| Custom SSL certificate | the ACM certificate above |
+
+`CachingDisabled` with `AllViewer` at the default behaviour is deliberate:
+cookies, the `Host` header and query strings all have to reach the origin
+intact or the login flow breaks. nginx already sets far-future cache headers on
+`/static/*`, so add a second behaviour for `/static/*` with **CachingOptimized**
+to get CDN caching where it is safe.
+
+Finally, point `arena.bortle.app` at the distribution with a CNAME to the
+`d111111abcdef8.cloudfront.net` hostname.
+
+### Lock the origin to CloudFront
+
+Back in the EC2 security group, change the HTTP rule's source from anywhere to
+the managed prefix list **`com.amazonaws.global.cloudfront.origin-facing`**.
+The instance then only accepts traffic that came through CloudFront.
 
 ## 6. Add the production redirect to Discord
 
@@ -150,32 +207,12 @@ credential.
 app → **OAuth2 → Redirects → Add**:
 
 ```
-https://your-domain.com/login/oauth2/code/discord
+https://arena.bortle.app/login/oauth2/code/discord
 ```
 
-Save. Keep the localhost entry so development still works.
+Keep the localhost entry so development still works.
 
-## 7. Start it
-
-```bash
-cd ~/arena-master
-docker compose -f compose.prod.yaml up -d
-docker compose -f compose.prod.yaml logs -f app
-```
-
-Flyway creates the schema on first boot. Watch for `Started ArenaMasterApiApplication`,
-then check:
-
-```bash
-curl https://your-domain.com/actuator/health
-```
-
-Caddy's first certificate takes a few seconds. If it fails, the cause is almost
-always DNS not yet pointing at the instance, or port 80 being unreachable.
-
-## 8. Turn on automatic deployments
-
-Create a deploy key on the instance and give the public half to itself:
+## 7. Turn on automatic deployments
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/github_actions -N ""
@@ -183,13 +220,13 @@ cat ~/.ssh/github_actions.pub >> ~/.ssh/authorized_keys
 cat ~/.ssh/github_actions          # the private key, for the secret below
 ```
 
-In the repository, **Settings → Secrets and variables → Actions**:
+**Settings → Secrets and variables → Actions**
 
 *Secrets*
 
 | Name | Value |
 | ---- | ----- |
-| `DEPLOY_HOST` | your domain or Elastic IP |
+| `DEPLOY_HOST` | the Elastic IP |
 | `DEPLOY_USER` | `ec2-user` |
 | `DEPLOY_SSH_KEY` | the private key printed above, in full |
 
@@ -198,15 +235,10 @@ In the repository, **Settings → Secrets and variables → Actions**:
 | Name | Value |
 | ---- | ----- |
 | `DEPLOY_ENABLED` | `true` |
-| `ARENA_DOMAIN` | `your-domain.com` |
+| `ARENA_DOMAIN` | `arena.bortle.app` |
 
-Push to `main`. The workflow builds the image, publishes it to GHCR, pulls it on
-the instance, restarts the app container, and fails the run if the site does not
-report healthy afterwards.
-
-The GHCR package defaults to private. Make it public
-(**Packages → arena-master → Package settings → Change visibility**) or the
-instance cannot pull it without credentials.
+Push to `main`: both images build, publish to GHCR, get pulled on the instance,
+and the run fails if the site does not report healthy afterwards.
 
 ---
 
@@ -215,7 +247,8 @@ instance cannot pull it without credentials.
 **Logs**
 
 ```bash
-docker compose -f compose.prod.yaml logs -f app
+docker compose -f compose.prod.yaml logs -f backend
+docker compose -f compose.prod.yaml logs -f frontend
 ```
 
 **Back up the database** — nothing does this for you:
@@ -224,7 +257,7 @@ docker compose -f compose.prod.yaml logs -f app
 docker exec arena-db pg_dump -U arena arenamaster | gzip > backup-$(date +%F).sql.gz
 ```
 
-Worth a cron entry, and worth copying somewhere off the instance.
+Worth a cron entry, and worth copying off the instance.
 
 **Restore**
 
@@ -232,23 +265,19 @@ Worth a cron entry, and worth copying somewhere off the instance.
 gunzip -c backup-2026-08-16.sql.gz | docker exec -i arena-db psql -U arena -d arenamaster
 ```
 
-**Seed demo data** so the site is not empty for visitors:
-
-```bash
-# From a machine with the repository, against the deployed API
-python seed_data.py
-```
+**Seed demo data** so the site is not empty for visitors — run from a machine
+with the repository, pointed at the deployed API.
 
 ## Known limitations
 
 Deliberate, and worth being able to explain rather than pretending otherwise:
 
-- **No redundancy.** One instance. It reboots, the site is down for a minute.
+- **No redundancy.** One instance. It reboots, the site is briefly down.
 - **Backups are manual** unless you add the cron job above.
-- **A deploy has a few seconds of downtime** while the app container restarts.
-  Zero-downtime would mean two app containers and Caddy load-balancing between
-  them — worth doing when anyone would notice.
-- **The database shares the instance.** Fine at this size; the first thing to
-  move to RDS if traffic ever justified it.
-- **The Discord bot is not deployed.** It is a separate process; it can run
-  locally against the production API, or be added as another Compose service.
+- **A deploy has a few seconds of downtime** while the containers restart.
+  Zero-downtime would mean two backends and nginx balancing between them —
+  worth doing when someone would notice.
+- **The database shares the instance.** Fine at this size, and the first thing
+  to move to RDS if traffic ever justified it.
+- **The Discord bot is not deployed.** It can run locally against the
+  production API, or be added as a fourth compose service.

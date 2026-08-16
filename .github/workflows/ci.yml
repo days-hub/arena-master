@@ -50,22 +50,29 @@ jobs:
         env:
           CI: true
 
-  image:
-    name: Container image builds
+  images:
+    name: Container images build
     runs-on: ubuntu-latest
-    # No point building the image if the code that goes in it is broken.
+    # No point building images if the code inside them is broken.
     needs: [backend, frontend]
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: ./springboot-server
+          - name: frontend
+            context: ./frontend
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      # Build only — pushing is deploy.yml's job. This exists so a Dockerfile
-      # mistake fails here rather than during a deploy.
-      - name: Build image
+      # Build only — publishing is deploy.yml's job. This exists so a
+      # Dockerfile mistake fails here rather than during a deploy.
+      - name: Build ${{ matrix.name }} image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

@@ -85,15 +85,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/me").permitAll()
                         // Login endpoints must stay reachable while signed out.
                         .requestMatchers("/oauth2/**", "/login/**").permitAll()
-                        // Everything else under /api — every write, plus the
-                        // guild member list and the notify relay — needs an
-                        // account. Listed before the static rule below so a
-                        // new endpoint is private by default rather than
-                        // being caught by the catch-all.
-                        .requestMatchers("/api/**").authenticated()
-                        // The packaged React build: assets and the client-side
-                        // routes that fall back to index.html.
-                        .requestMatchers(HttpMethod.GET, "/**").permitAll()
+                        // Everything else — every write, plus the guild member
+                        // list and the notify relay — needs an account. nginx
+                        // serves the React build and only proxies /api,
+                        // /oauth2, /login and /actuator here, so there is no
+                        // static content to make an exception for.
                         .anyRequest().authenticated())
                 .logout(logout -> logout
                         .logoutUrl("/api/logout")
