@@ -1,0 +1,32 @@
+# Caddy obtains and renews a Let's Encrypt certificate automatically, provided
+# the domain's DNS points at this instance and ports 80 and 443 are reachable.
+#
+# Note this cannot work for an *.amazonaws.com hostname: Let's Encrypt will not
+# issue certificates for them. A real domain (or a DuckDNS subdomain) is
+# required, and Discord's OAuth insists on HTTPS for any non-localhost redirect.
+
+{$ARENA_DOMAIN} {
+	encode zstd gzip
+
+	# The app is only reachable on the compose network; Caddy is the sole
+	# public entry point.
+	reverse_proxy app:8000 {
+		# Spring reads these to build https:// OAuth redirect URIs rather than
+		# the plain http:// it sees behind the proxy.
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 3
+		}
+	}
+}

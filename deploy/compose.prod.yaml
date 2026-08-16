@@ -1,0 +1,80 @@
+# Production stack for a single EC2 instance: the app, its database, and Caddy
+# terminating TLS in front. Copy this and Caddyfile to the server alongside a
+# .env holding the secrets, then `docker compose -f compose.prod.yaml up -d`.
+#
+# Only Caddy publishes ports. Postgres and the app are reachable solely on the
+# compose network, so the database is never exposed to the internet.
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: arena-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-arenamaster}
+      POSTGRES_USER: ${POSTGRES_USER:-arena}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      # postgres:18 keeps its data under /var/lib/postgresql, not .../data.
+      - arena-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arena} -d ${POSTGRES_DB:-arenamaster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ${ARENA_IMAGE:-ghcr.io/days-hub/arena-master:latest}
+    container_name: arena-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-arenamaster}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-arena}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      # Same origin now, so the post-login redirect is just the site root.
+      FRONTEND_BASE_URL: /
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      ADMIN_DISCORD_IDS: ${ADMIN_DISCORD_IDS}
+      ARENA_SERVICE_KEY: ${ARENA_SERVICE_KEY}
+      RIOT_API_KEY: ${RIOT_API_KEY}
+      RIOT_PLATFORM: ${RIOT_PLATFORM:-na1}
+      # 2 GB instance shared with Postgres and Caddy: leave the JVM room to
+      # be a good neighbour rather than sizing to the whole box.
+      JAVA_OPTS: "-XX:MaxRAMPercentage=55"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/actuator/health | grep -q UP || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: arena-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ARENA_DOMAIN: ${ARENA_DOMAIN:?ARENA_DOMAIN must be set}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here; losing this volume means re-issuing them and
+      # burning Let's Encrypt rate limit.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  arena-pgdata:
+  caddy-data:
+  caddy-config:
