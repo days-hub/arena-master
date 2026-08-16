@@ -5,6 +5,8 @@ import com.arenamaster.api.domain.Team;
 import com.arenamaster.api.dto.AddMemberRequest;
 import com.arenamaster.api.dto.CreateTeamRequest;
 import com.arenamaster.api.dto.MemberView;
+import com.arenamaster.api.dto.RiotAccountView;
+import com.arenamaster.api.dto.RosterMemberView;
 import com.arenamaster.api.dto.TeamView;
 import com.arenamaster.api.dto.UpdateTeamAvatarRequest;
 import com.arenamaster.api.error.ApiException;
@@ -29,14 +31,17 @@ public class TeamService {
     private final ApplicationEventPublisher events;
     private final AccessControl access;
     private final TournamentService tournamentService;
+    private final RiotAccountService riotAccounts;
 
     public TeamService(TeamRepository teams, DiscordClient discord, ApplicationEventPublisher events,
-                       AccessControl access, TournamentService tournamentService) {
+                       AccessControl access, TournamentService tournamentService,
+                       RiotAccountService riotAccounts) {
         this.teams = teams;
         this.discord = discord;
         this.events = events;
         this.access = access;
         this.tournamentService = tournamentService;
+        this.riotAccounts = riotAccounts;
     }
 
     private void announce(String message) {
@@ -98,15 +103,22 @@ public class TeamService {
     }
 
     /** Public presentation roster: resolves only members belonging to this team. */
-    public List<MemberView> getRosterByName(String name) {
+    public List<RosterMemberView> getRosterByName(String name) {
         Team team = teams.findByName(name).orElseThrow(() -> new ApiException(404, "Team not found"));
-        List<MemberView> roster = new ArrayList<>();
+        List<String> discordIds = team.getMembers().stream().map(String::valueOf).toList();
+        // One cached lookup for the whole roster rather than a call per member.
+        Map<String, RiotAccountView> riotByDiscordId = riotAccounts.viewsByDiscordId(discordIds);
+
+        List<RosterMemberView> roster = new ArrayList<>();
         for (int index = 0; index < team.getMembers().size(); index++) {
             Long memberId = team.getMembers().get(index);
             MemberView member = discord.fetchMember(memberId);
-            roster.add(member != null
-                    ? member
-                    : new MemberView(String.valueOf(memberId), "Player " + (index + 1), null));
+            String id = String.valueOf(memberId);
+            roster.add(new RosterMemberView(
+                    id,
+                    member != null ? member.name() : "Player " + (index + 1),
+                    member != null ? member.avatar() : null,
+                    riotByDiscordId.get(id)));
         }
         return roster;
     }

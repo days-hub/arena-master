@@ -2,7 +2,7 @@ package com.arenamaster.api.web;
 
 import com.arenamaster.api.dto.AddMemberRequest;
 import com.arenamaster.api.dto.CreateTeamRequest;
-import com.arenamaster.api.dto.MemberView;
+import com.arenamaster.api.dto.RosterMemberView;
 import com.arenamaster.api.dto.TeamView;
 import com.arenamaster.api.dto.UpdateTeamAvatarRequest;
 import com.arenamaster.api.service.TeamService;
@@ -61,7 +61,7 @@ public class TeamController {
     }
 
     @GetMapping("/by_name/{teamName}/members")
-    public List<MemberView> rosterByName(@PathVariable String teamName) {
+    public List<RosterMemberView> rosterByName(@PathVariable String teamName) {
         return service.getRosterByName(teamName);
     }
 

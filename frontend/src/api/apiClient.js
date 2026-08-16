@@ -42,4 +42,12 @@ export const removeMemberFromTeam = (teamId, memberId) => api.delete(`/teams/${t
 export const fetchDiscordMembers = () => api.get('/discord/members');
 export const fetchStandings = () => api.get('/standings');
 
+// League of Legends. /riot/status is public so the UI can hide these
+// features entirely when the server has no Riot API key configured.
+export const fetchRiotStatus = () => api.get('/riot/status');
+export const fetchMyRiotAccount = () => api.get('/me/riot');
+export const linkRiotAccount = (data) => api.post('/me/riot', data);
+export const refreshRiotAccount = () => api.post('/me/riot/refresh');
+export const unlinkRiotAccount = () => api.delete('/me/riot');
+
 export default api;

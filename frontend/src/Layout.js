@@ -6,7 +6,7 @@ import {
 } from '@mui/material';
 import {
   AccountTreeRounded, AddCircleOutlineRounded, DashboardRounded, Groups2Rounded,
-  LeaderboardRounded, LoginRounded, LogoutRounded, MenuRounded,
+  LeaderboardRounded, LoginRounded, LogoutRounded, MenuRounded, PersonRounded,
 } from '@mui/icons-material';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { useTheme } from '@mui/material/styles';
@@ -16,6 +16,7 @@ import TournamentCreation from './views/TournamentCreation';
 import TeamRegistration from './views/TeamRegistration';
 import TournamentBracket from './views/TournamentBracket';
 import Standings from './views/Standings';
+import Profile from './views/Profile';
 import { BRAND } from './theme';
 import { LiveDot } from './components/Motion';
 
@@ -26,6 +27,7 @@ const NAV = [
   { label: 'Teams', icon: <Groups2Rounded />, to: '/register-team' },
   { label: 'Bracket', icon: <AccountTreeRounded />, to: '/bracket' },
   { label: 'Standings', icon: <LeaderboardRounded />, to: '/standings' },
+  { label: 'Profile', icon: <PersonRounded />, to: '/profile' },
 ];
 
 const AccountControl = ({ compact = false }) => {
@@ -179,6 +181,7 @@ const Layout = () => {
               <Route path="/bracket" element={<TournamentBracket />} />
               <Route path="/bracket/:tournamentName" element={<TournamentBracket />} />
               <Route path="/standings" element={<Standings />} />
+              <Route path="/profile" element={<Profile />} />
             </Routes>
           </Box>
         </Box>

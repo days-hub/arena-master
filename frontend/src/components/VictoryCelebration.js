@@ -6,6 +6,7 @@ import {
   CloseRounded, EmojiEventsRounded, ReplayRounded, SportsEsportsRounded,
 } from '@mui/icons-material';
 import { CelebrationBurst } from './Motion';
+import RankChip from './RankChip';
 
 const initials = (name = '') => name
   .split(/\s+/)
@@ -68,6 +69,8 @@ const VictoryCelebration = ({
               <Typography variant="body2" sx={{ maxWidth: 112, color: 'white', fontWeight: 750 }} noWrap>
                 {member.name}
               </Typography>
+              {/* Renders nothing for players without a linked account. */}
+              <RankChip riot={member.riot} />
             </Stack>
           )) : (
             <Stack className="arena-victory-player" alignItems="center" spacing={0.85} sx={{ '--player-index': 0 }}>
