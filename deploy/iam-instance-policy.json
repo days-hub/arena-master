@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ShipContainerLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams",
+        "logs:PutRetentionPolicy"
+      ],
+      "Resource": "arn:aws:logs:*:*:log-group:/arena-master/*"
+    },
+    {
+      "Sid": "PublishAgentMetrics",
+      "Effect": "Allow",
+      "Action": "cloudwatch:PutMetricData",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "cloudwatch:namespace": "ArenaMaster"
+        }
+      }
+    },
+    {
+      "Sid": "AgentReadsInstanceTags",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeTags",
+      "Resource": "*"
+    }
+  ]
+}

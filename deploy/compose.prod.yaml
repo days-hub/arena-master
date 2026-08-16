@@ -26,6 +26,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    # Cap local logs so a crash loop can't fill a 20 GB volume.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/days-hub/arena-master-backend:latest}
@@ -60,6 +66,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     image: ${FRONTEND_IMAGE:-ghcr.io/days-hub/arena-master-frontend:latest}
@@ -72,6 +83,11 @@ services:
       # managed origin-facing prefix list in the security group so the origin
       # is not reachable directly.
       - "80:80"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   arena-pgdata:

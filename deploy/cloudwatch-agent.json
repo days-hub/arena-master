@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "CloudWatch agent config. EC2 publishes CPU, network and disk I/O for free,",
+    "but not memory or disk usage — the hypervisor cannot see inside the guest.",
+    "On a 2 GB instance shared by a JVM, PostgreSQL and nginx, memory is the",
+    "most likely thing to go wrong, so it is worth the two custom metrics.",
+    "Two metrics sits well inside the 10 that are always free.",
+    "Install: sudo dnf install -y amazon-cloudwatch-agent, then",
+    "sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \\",
+    "  -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json"
+  ],
+  "agent": {
+    "metrics_collection_interval": 300,
+    "run_as_user": "root"
+  },
+  "metrics": {
+    "namespace": "ArenaMaster",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "aggregation_dimensions": [["InstanceId"]],
+    "metrics_collected": {
+      "mem": {
+        "measurement": [
+          { "name": "mem_used_percent", "rename": "MemoryUsedPercent", "unit": "Percent" }
+        ]
+      },
+      "disk": {
+        "resources": ["/"],
+        "measurement": [
+          { "name": "used_percent", "rename": "DiskUsedPercent", "unit": "Percent" }
+        ],
+        "ignore_file_system_types": ["sysfs", "devtmpfs", "tmpfs", "overlay"]
+      }
+    }
+  }
+}

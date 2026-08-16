@@ -242,6 +242,90 @@ and the run fails if the site does not report healthy afterwards.
 
 ---
 
+## 8. Monitoring with CloudWatch (optional, free)
+
+Worth doing once the stack is up and verified. Everything below sits inside
+CloudWatch's permanently-free tier — 5 GB of log ingestion, 10 custom metrics
+and 10 alarms per month — so it costs nothing at this scale.
+
+**Skip CloudWatch Synthetics.** Its free tier is 100 canary runs a month, which
+is one check every seven hours; a useful five-minute canary would be ~8,600 runs
+and cost real money. Alarms on the metrics below do the same job for $0.
+
+### Give the instance permission
+
+**IAM → Policies → Create policy → JSON**, paste `deploy/iam-instance-policy.json`,
+name it `arena-master-observability`.
+
+**IAM → Roles → Create role → AWS service → EC2**, attach that policy, name it
+`arena-master-instance`.
+
+**EC2 → your instance → Actions → Security → Modify IAM role** → select it. No
+restart needed.
+
+### Ship container logs
+
+```bash
+cd ~/arena-master
+curl -O https://raw.githubusercontent.com/days-hub/arena-master/main/deploy/compose.cloudwatch.yaml
+
+docker compose -f compose.prod.yaml -f compose.cloudwatch.yaml up -d
+```
+
+Logs now appear under **CloudWatch → Log groups → `/arena-master/*`**.
+
+Two things to know. `docker compose logs` shows nothing once this is on, because
+nothing is written locally — read logs in the console instead. And log groups
+default to keeping data forever, so set retention or you will eventually drift
+past the free 5 GB archive:
+
+```bash
+for g in backend frontend db; do
+  aws logs put-retention-policy --log-group-name "/arena-master/$g" --retention-in-days 14
+done
+```
+
+### Memory and disk metrics
+
+EC2 publishes CPU and network for free, but not memory or disk usage — the
+hypervisor cannot see inside the guest. On a 2 GB box shared by a JVM,
+PostgreSQL and nginx, memory is the most likely thing to go wrong.
+
+```bash
+sudo dnf install -y amazon-cloudwatch-agent
+sudo curl -o /opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json \
+  https://raw.githubusercontent.com/days-hub/arena-master/main/deploy/cloudwatch-agent.json
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json
+```
+
+Two custom metrics, well inside the free ten.
+
+### Alarms worth having
+
+First create somewhere for them to go: **SNS → Topics → Create topic** (Standard,
+`arena-master-alerts`), then **Create subscription** → Email → your address, and
+confirm the email. 1,000 email notifications a month are free.
+
+**CloudWatch → Alarms → Create alarm**, four of them:
+
+| Metric | Condition | Catches |
+| ------ | --------- | ------- |
+| `StatusCheckFailed` (EC2) | `>= 1` for 2 minutes | The instance is unreachable or unhealthy |
+| `CPUUtilization` (EC2) | `> 80%` for 15 minutes | A runaway process or genuine load |
+| `MemoryUsedPercent` (ArenaMaster) | `> 85%` for 10 minutes | The JVM crowding out Postgres — the failure mode this size of box actually has |
+| `DiskUsedPercent` (ArenaMaster) | `> 80%` | Images and logs filling the volume |
+
+Four of ten free alarms used.
+
+### A dashboard
+
+**CloudWatch → Dashboards → Create**, add CPU, memory, disk and network. Three
+dashboards are free, and it is the single most useful thing to have open while
+you are demonstrating the project to someone.
+
+---
+
 ## Running it
 
 **Logs**

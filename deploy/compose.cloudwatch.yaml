@@ -1,0 +1,47 @@
+# Ships container logs to CloudWatch Logs. Applied as an overlay so the base
+# stack stays runnable and debuggable without AWS:
+#
+#   docker compose -f compose.prod.yaml -f compose.cloudwatch.yaml up -d
+#
+# Prerequisites: the instance needs an IAM role granting the permissions in
+# iam-instance-policy.json, and the Docker daemon needs no extra configuration
+# — the awslogs driver is built in.
+#
+# Trade-off worth knowing: with the awslogs driver, `docker compose logs` no
+# longer shows anything, because nothing is written locally. Read logs in the
+# CloudWatch console instead. Deploy the base file alone while you are still
+# bringing the stack up, and add this overlay once it works.
+#
+# Set retention on the log groups after the first run, or they keep everything
+# forever and eventually leave the 5 GB free archive behind:
+#
+#   aws logs put-retention-policy --log-group-name /arena-master/backend \
+#     --retention-in-days 14
+
+services:
+  backend:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /arena-master/backend
+        awslogs-create-group: "true"
+        awslogs-stream: backend
+
+  frontend:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /arena-master/frontend
+        awslogs-create-group: "true"
+        awslogs-stream: nginx
+
+  db:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /arena-master/db
+        awslogs-create-group: "true"
+        awslogs-stream: postgres
