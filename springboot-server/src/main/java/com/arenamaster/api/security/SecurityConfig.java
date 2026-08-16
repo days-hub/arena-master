@@ -74,6 +74,9 @@ public class SecurityConfig {
                                 "/", "/api/games", "/api/tournaments/**", "/api/standings",
                                 "/api/teams", "/api/teams/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+                        // Lets the UI decide whether to offer League features
+                        // before anyone has signed in.
+                        .requestMatchers(HttpMethod.GET, "/api/riot/status").permitAll()
                         // Reports 401 itself, with a body the frontend reads.
                         .requestMatchers("/api/me").permitAll()
                         // Login endpoints must stay reachable while signed out.
