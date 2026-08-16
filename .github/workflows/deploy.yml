@@ -14,7 +14,9 @@ on:
 jobs:
   build:
     name: Build and publish images
-    runs-on: ubuntu-latest
+    # Must match the Graviton instance's architecture — an x86 image will not
+    # run there. Free for public repositories.
+    runs-on: ubuntu-24.04-arm
     if: vars.DEPLOY_ENABLED == 'true'
     permissions:
       contents: read
@@ -55,6 +57,10 @@ jobs:
     name: Roll out on EC2
     runs-on: ubuntu-latest
     needs: build
+    # Separate flag from DEPLOY_ENABLED so images can be published before the
+    # server exists — the instance has to pull them from somewhere on its
+    # first start, which is a chicken-and-egg otherwise.
+    if: vars.ROLLOUT_ENABLED == 'true'
     steps:
       # Pull the new images and recreate the app containers. Postgres is left
       # untouched, so this never risks the data.

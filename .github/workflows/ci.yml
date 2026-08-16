@@ -52,7 +52,11 @@ jobs:
 
   images:
     name: Container images build
-    runs-on: ubuntu-latest
+    # ARM, because the deployment target is a Graviton t4g instance. Building
+    # on x86 would produce images the server cannot run. These runners are
+    # free for public repositories, so this costs nothing and avoids the very
+    # slow QEMU emulation the alternative would need.
+    runs-on: ubuntu-24.04-arm
     # No point building images if the code inside them is broken.
     needs: [backend, frontend]
     strategy:
