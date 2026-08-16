@@ -7,6 +7,7 @@ import com.arenamaster.api.dto.LinkRiotAccountRequest;
 import com.arenamaster.api.dto.RiotAccountView;
 import com.arenamaster.api.error.ApiException;
 import com.arenamaster.api.repository.RiotAccountRepository;
+import com.arenamaster.api.riot.DataDragonVersions;
 import com.arenamaster.api.riot.RiotClient;
 import com.arenamaster.api.security.AccessControl;
 import lombok.extern.slf4j.Slf4j;
@@ -34,20 +35,22 @@ import java.util.stream.Collectors;
 @Slf4j
 public class RiotAccountService {
 
-    private static final String ICON_CDN = "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/profileicon/%d.png";
     private static final Set<String> APEX_TIERS = Set.of("MASTER", "GRANDMASTER", "CHALLENGER");
 
     private final RiotAccountRepository accounts;
     private final RiotClient riot;
     private final RiotProperties props;
     private final AccessControl access;
+    private final DataDragonVersions dataDragon;
 
     public RiotAccountService(RiotAccountRepository accounts, RiotClient riot,
-                              RiotProperties props, AccessControl access) {
+                              RiotProperties props, AccessControl access,
+                              DataDragonVersions dataDragon) {
         this.accounts = accounts;
         this.riot = riot;
         this.props = props;
         this.access = access;
+        this.dataDragon = dataDragon;
     }
 
     public boolean isEnabled() {
@@ -57,7 +60,7 @@ public class RiotAccountService {
     @Transactional(readOnly = true)
     public Optional<RiotAccountView> forCurrentUser() {
         User user = access.requireUser();
-        return accounts.findByUserId(user.getId()).map(RiotAccountService::toView);
+        return accounts.findByUserId(user.getId()).map(this::toView);
     }
 
     /**
@@ -155,7 +158,7 @@ public class RiotAccountService {
         }
         return accounts.findByUserDiscordIdIn(discordIds).stream()
                 .collect(Collectors.toMap(a -> a.getUser().getDiscordId(),
-                        RiotAccountService::toView,
+                        this::toView,
                         (first, second) -> first));
     }
 
@@ -190,12 +193,12 @@ public class RiotAccountService {
         }
     }
 
-    private static RiotAccountView toView(RiotAccount account) {
+    private RiotAccountView toView(RiotAccount account) {
         return new RiotAccountView(
                 account.riotId(),
                 account.getPlatform(),
                 account.getSummonerLevel(),
-                account.getProfileIconId() == null ? null : ICON_CDN.formatted(account.getProfileIconId()),
+                account.getProfileIconId() == null ? null : dataDragon.profileIconUrl(account.getProfileIconId()),
                 account.getTier(),
                 account.getDivision(),
                 account.getLeaguePoints(),
