@@ -68,7 +68,7 @@ command, so bot actions obey exactly the same permission rules as the web UI.
                     ├── Spring Boot  the API
                     └── PostgreSQL   EBS-backed volume
 
-GitHub Actions ── build (ARM runners) → GHCR → pull & restart over SSH → health check
+GitHub Actions ── build (ARM runners) → GHCR → pull & restart via SSM → health check
 ```
 
 nginx is the only public entry point and proxies `/api`, `/oauth2`, `/login` and
@@ -130,7 +130,13 @@ CloudFront, CloudWatch, backups, and the cost breakdown (about **$14/month**).
 
 Pushing to `main` builds both images on ARM runners, publishes them to GHCR, pulls
 and restarts them on the instance, and **fails the run if the site doesn't come back
-healthy**.
+healthy**. No AWS keys are stored anywhere: GitHub mints an OIDC token per run, and
+the rollout goes over Systems Manager, so the instance takes no inbound SSH at all.
+
+Container logs ship to CloudWatch with 14-day retention, the agent publishes memory
+and disk (which EC2 can't see from outside the guest), and four alarms — instance
+health, CPU, memory, disk — email through SNS. All of it inside the permanently free
+tier.
 
 ## Some decisions worth explaining
 

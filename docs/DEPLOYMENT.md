@@ -293,36 +293,57 @@ and cost real money. Alarms on the metrics below do the same job for $0.
 
 ### Give the instance permission
 
-**IAM → Policies → Create policy → JSON**, paste `deploy/iam-instance-policy.json`,
-name it `arena-master-observability`.
+The instance already carries the `arena-master-instance` role from step 7, so this
+extends that role rather than creating a second one:
 
-**IAM → Roles → Create role → AWS service → EC2**, attach that policy, name it
-`arena-master-instance`.
+**IAM → Roles → `arena-master-instance` → Add permissions → Create inline policy →
+JSON**, paste `deploy/iam-instance-policy.json`, name it
+`arena-master-observability`.
 
-**EC2 → your instance → Actions → Security → Modify IAM role** → select it. No
-restart needed.
+Use the **JSON** tab rather than the visual editor — the policy spans three
+services (`logs`, `cloudwatch`, `ec2`) and the visual editor makes you build one
+block per service. Role credentials refresh on their own, so nothing needs
+restarting.
+
+The policy deliberately omits `logs:DescribeLogGroups`. It is a list-level action
+that cannot be scoped to a log-group prefix, so granting it would mean
+`Resource: "*"` — a wider grant than the instance needs to *write* its own logs.
+Verification below uses `DescribeLogStreams`, which is scoped, or the console.
 
 ### Ship container logs
 
+Do any pending seeding or debugging *before* this step. Once the overlay is on,
+`docker compose logs` shows nothing, because nothing is written locally any more —
+logs go straight to CloudWatch. Finish anything that needs local logs first.
+
 ```bash
 cd ~/arena-master
-curl -O https://raw.githubusercontent.com/days-hub/arena-master/main/deploy/compose.cloudwatch.yaml
+curl -sL -o compose.cloudwatch.yaml \
+  https://github.com/days-hub/arena-master/raw/main/deploy/compose.cloudwatch.yaml
 
 docker compose -f compose.prod.yaml -f compose.cloudwatch.yaml up -d
 ```
 
-Logs now appear under **CloudWatch → Log groups → `/arena-master/*`**.
+Fetch through `github.com/.../raw/...` rather than `raw.githubusercontent.com`,
+which caches aggressively and has served a stale copy of a file minutes after it
+was pushed.
 
-Two things to know. `docker compose logs` shows nothing once this is on, because
-nothing is written locally — read logs in the console instead. And log groups
-default to keeping data forever, so set retention or you will eventually drift
-past the free 5 GB archive:
+Logs now appear under **CloudWatch → Log groups → `/arena-master/*`**. Log groups
+default to keeping data forever, so set retention or you will eventually drift past
+the free 5 GB archive:
 
 ```bash
 for g in backend frontend db; do
   aws logs put-retention-policy --log-group-name "/arena-master/$g" --retention-in-days 14
 done
+
+aws logs describe-log-streams --log-group-name /arena-master/backend \
+  --query 'logStreams[].[logStreamName,lastEventTimestamp]' --output table
 ```
+
+A row with a recent epoch-millisecond timestamp means the `awslogs` driver is
+delivering. Retention itself shows as a column in **CloudWatch → Log groups** —
+reading it from the instance would need the wider permission described above.
 
 ### Memory and disk metrics
 
@@ -332,28 +353,53 @@ PostgreSQL and nginx, memory is the most likely thing to go wrong.
 
 ```bash
 sudo dnf install -y amazon-cloudwatch-agent
-sudo curl -o /opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json \
-  https://raw.githubusercontent.com/days-hub/arena-master/main/deploy/cloudwatch-agent.json
+sudo curl -sL -o /opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json \
+  https://github.com/days-hub/arena-master/raw/main/deploy/cloudwatch-agent.json
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
   -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json
+
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a status
+sudo tail -5 /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
 ```
 
-Two custom metrics, well inside the free ten.
+Want `"status": "running"` and a log tail with no `AccessDenied`. Two custom
+metrics, well inside the free ten. The first datapoints land about five minutes
+later — the collection interval — after which **CloudWatch → Metrics →
+ArenaMaster** lists them.
 
 ### Alarms worth having
 
 First create somewhere for them to go: **SNS → Topics → Create topic** (Standard,
 `arena-master-alerts`), then **Create subscription** → Email → your address, and
-confirm the email. 1,000 email notifications a month are free.
+click the confirmation link. An unconfirmed subscription silently drops everything.
+1,000 email notifications a month are free. SNS is listed in the console under
+**Application Integration → Simple Notification Service**.
 
-**CloudWatch → Alarms → Create alarm**, four of them:
+**CloudWatch → Alarms → Create alarm**, four of them, each notifying
+`arena-master-alerts`:
 
-| Metric | Condition | Catches |
-| ------ | --------- | ------- |
-| `StatusCheckFailed` (EC2) | `>= 1` for 2 minutes | The instance is unreachable or unhealthy |
-| `CPUUtilization` (EC2) | `> 80%` for 15 minutes | A runaway process or genuine load |
-| `MemoryUsedPercent` (ArenaMaster) | `> 85%` for 10 minutes | The JVM crowding out Postgres — the failure mode this size of box actually has |
-| `DiskUsedPercent` (ArenaMaster) | `> 80%` | Images and logs filling the volume |
+| Name | Metric | Statistic / Period | Condition | Catches |
+| ---- | ------ | ------------------ | --------- | ------- |
+| `arena-instance-unhealthy` | `StatusCheckFailed` (AWS/EC2) | Maximum / 1 min | `>= 1`, 2 of 2 datapoints | The instance is unreachable or unhealthy |
+| `arena-cpu-high` | `CPUUtilization` (AWS/EC2) | Average / 5 min | `> 80`, 3 of 3 | A runaway process or genuine load |
+| `arena-memory-high` | `MemoryUsedPercent` (ArenaMaster) | Average / 5 min | `> 85`, 2 of 2 | The JVM crowding out Postgres — the failure mode this size of box actually has |
+| `arena-disk-high` | `DiskUsedPercent` (ArenaMaster) | Average / 5 min | `> 80`, 1 of 1 | Images and logs filling the volume |
+
+Two settings apply to `arena-instance-unhealthy` alone. Set **missing data
+treatment** to *breaching*: a stopped or wedged instance stops publishing
+altogether, and the default would leave the alarm parked in `INSUFFICIENT_DATA`
+rather than telling you about the outage. And add a second notification with the
+**OK** state trigger, so you hear that it recovered as well as that it broke. The
+other three keep the default missing-data handling and alert on `In alarm` only —
+they flap more, and a gap during a deploy is not worth an email.
+
+The threshold on the status check is `>= 1` because the metric is the OR of the
+system and instance checks: it is 0 or 1 and never reaches 2. The other three use
+`>` (Greater), not Greater/Equal.
+
+Each new alarm emails once as it settles from `INSUFFICIENT_DATA` to `OK`. That
+first message is not an outage — it is the whole pipeline proving itself, from
+metric through alarm through SNS to your inbox, without having to break anything.
 
 Four of ten free alarms used.
 
@@ -407,8 +453,22 @@ few cents a month.
 gunzip -c backup-2026-08-16.sql.gz | docker exec -i arena-db psql -U arena -d arenamaster
 ```
 
-**Seed demo data** so the site is not empty for visitors — run from a machine
-with the repository, pointed at the deployed API.
+**Seed demo data** so the site is not empty for visitors. Simplest from the
+instance itself, where `.env` already holds `ARENA_SERVICE_KEY` and
+`ADMIN_DISCORD_IDS`:
+
+```bash
+cd ~/arena-master
+curl -sL -o seed_data.py https://github.com/days-hub/arena-master/raw/main/seed_data.py
+python3 seed_data.py --reset --api http://localhost/api
+```
+
+Port 80 rather than 8000 sends the requests through nginx, the same path a browser
+takes, so a successful seed also proves the proxy. `--as-user` is optional; it
+defaults to the first id in `ADMIN_DISCORD_IDS`.
+
+This announces every seeded result to Discord. To seed quietly, comment out
+`DISCORD_WEBHOOK_URL` in `.env`, restart the backend, seed, then restore it.
 
 ## Known limitations
 
