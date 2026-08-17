@@ -13,6 +13,12 @@ RUN ./mvnw -B -ntp clean package -DskipTests
 
 FROM eclipse-temurin:25-jre
 WORKDIR /app
+# curl is for the container healthcheck: the temurin JRE image ships no HTTP
+# client at all, so a healthcheck using wget or nc silently exits 127 and the
+# container reports unhealthy while the application is running perfectly.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 # Nothing here needs privileges.
 RUN useradd --system --create-home --shell /usr/sbin/nologin arena
 COPY --from=build /build/target/*.jar app.jar
