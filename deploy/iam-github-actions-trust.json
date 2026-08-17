@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Trust policy for the role GitHub Actions assumes. Replace ACCOUNT_ID.",
+    "",
+    "The sub condition is the security boundary: only workflows running on",
+    "this repository's main branch can assume the role. Without it, any",
+    "GitHub Actions workflow anywhere could — including one in a fork of this",
+    "repository opened as a pull request.",
+    "",
+    "No long-lived AWS keys exist anywhere: GitHub mints a short-lived OIDC",
+    "token per run and AWS exchanges it for temporary credentials."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:days-hub/arena-master:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}

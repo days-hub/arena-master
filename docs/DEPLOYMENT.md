@@ -214,31 +214,70 @@ Keep the localhost entry so development still works.
 
 ## 7. Turn on automatic deployments
 
+Deployment runs through **AWS Systems Manager**, not SSH.
+
+SSH would need GitHub's runners to reach port 22, and they have no fixed egress
+addresses to allow-list — GitHub publishes thousands of CIDRs and a security group
+caps at 60 rules. The only way to make SSH work would be opening port 22 to the
+internet, undoing the lockdown in step 2. The SSM agent instead connects *outbound*
+to AWS, so the instance needs no inbound access at all.
+
+### Let the instance talk to SSM
+
+**IAM → Roles → Create role → AWS service → EC2**, attach the AWS managed policy
+**`AmazonSSMManagedInstanceCore`**, name it `arena-master-instance`.
+
+**EC2 → your instance → Actions → Security → Modify IAM role** → select it.
+
+The agent ships with Amazon Linux 2023, so nothing to install. Within a minute or
+two the instance should appear in **Systems Manager → Fleet Manager**. If it does
+not, restart the agent:
+
 ```bash
-ssh-keygen -t ed25519 -C "github-actions" -f ~/.ssh/github_actions -N ""
-cat ~/.ssh/github_actions.pub >> ~/.ssh/authorized_keys
-cat ~/.ssh/github_actions          # the private key, for the secret below
+sudo systemctl restart amazon-ssm-agent
 ```
 
-**Settings → Secrets and variables → Actions**
+### Let GitHub assume a role
 
-*Secrets*
+**IAM → Identity providers → Add provider → OpenID Connect**
 
-| Name | Value |
-| ---- | ----- |
-| `DEPLOY_HOST` | the Elastic IP |
-| `DEPLOY_USER` | `ec2-user` |
-| `DEPLOY_SSH_KEY` | the private key printed above, in full |
+| Field | Value |
+| ----- | ----- |
+| Provider URL | `https://token.actions.githubusercontent.com` |
+| Audience | `sts.amazonaws.com` |
 
-*Variables*
+Then **IAM → Roles → Create role → Web identity**, pick that provider and the
+`sts.amazonaws.com` audience. Name it `arena-master-github-actions`.
+
+Edit its **trust policy** to match `deploy/iam-github-actions-trust.json`, replacing
+`ACCOUNT_ID`. The `sub` condition is what makes this safe — only workflows on this
+repository's `main` branch can assume the role, so a pull request from a fork
+cannot.
+
+Attach an inline policy from `deploy/iam-github-actions-policy.json`, replacing
+`ACCOUNT_ID` and `INSTANCE_ID`. It permits running one SSM document on one
+instance and nothing else.
+
+Copy the role ARN.
+
+### Configure the repository
+
+**Settings → Secrets and variables → Actions → Variables**
 
 | Name | Value |
 | ---- | ----- |
 | `DEPLOY_ENABLED` | `true` |
+| `ROLLOUT_ENABLED` | `true` |
 | `ARENA_DOMAIN` | `arena.bortle.app` |
+| `AWS_REGION` | `us-east-1` |
+| `AWS_ROLE_ARN` | the role ARN |
+| `INSTANCE_ID` | `i-...` |
 
-Push to `main`: both images build, publish to GHCR, get pulled on the instance,
-and the run fails if the site does not report healthy afterwards.
+No secrets are needed. There are no AWS keys to store: GitHub mints a short-lived
+OIDC token per run and AWS exchanges it for temporary credentials.
+
+Push to `main`: both images build, publish to GHCR, the instance pulls and restarts
+them, and the run fails if the site does not report healthy afterwards.
 
 ---
 

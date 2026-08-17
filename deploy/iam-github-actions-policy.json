@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Permissions for the GitHub Actions deploy role. Replace ACCOUNT_ID and",
+    "INSTANCE_ID.",
+    "",
+    "SendCommand is scoped to one instance and one document, so this role can",
+    "run a shell command on the Arena Master box and nothing else — it cannot",
+    "touch other instances, read parameters, or use any other SSM document."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RunShellCommandOnTheArenaInstance",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ssm:*::document/AWS-RunShellScript",
+        "arn:aws:ec2:*:ACCOUNT_ID:instance/INSTANCE_ID"
+      ]
+    },
+    {
+      "Sid": "ReadBackTheResult",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
