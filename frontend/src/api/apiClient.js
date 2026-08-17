@@ -1,6 +1,12 @@
 import axios from 'axios';
 
-export const API_ORIGIN = (process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+// An empty value means "same origin", which is how the deployed image is
+// built: nginx serves the UI and proxies /api, so relative URLs are correct
+// there. Nullish coalescing rather than `||` is load-bearing — an empty
+// string is falsy, so `||` fell through to the dev server's address and the
+// deployed site asked every visitor's own machine for its data.
+const configuredOrigin = process.env.REACT_APP_API_BASE_URL;
+export const API_ORIGIN = (configuredOrigin ?? 'http://localhost:8000').replace(/\/$/, '');
 
 const api = axios.create({
   baseURL: `${API_ORIGIN}/api`,
