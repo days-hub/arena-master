@@ -22,6 +22,16 @@ import org.springframework.security.web.authentication.SimpleUrlAuthenticationSu
 @Slf4j
 public class SecurityConfig {
 
+    /**
+     * Readable without an account: spectators browse brackets and standings.
+     * Held in one place because both GET and HEAD have to permit them, and a
+     * path added to only one of the two would behave inconsistently.
+     */
+    private static final String[] PUBLIC_READ_PATHS = {
+            "/", "/api/games", "/api/tournaments/**", "/api/standings", "/api/standings/**",
+            "/api/teams", "/api/teams/**", "/api/riot/status"
+    };
+
     @Value("${app.frontend-url}")
     private String frontendUrl;
 
@@ -70,17 +80,17 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Reading a bracket, the standings or the dashboard
                         // stays open to anyone — spectators don't sign in.
-                        .requestMatchers(HttpMethod.GET,
-                                "/", "/api/games", "/api/tournaments/**", "/api/standings", "/api/standings/**",
-                                "/api/teams", "/api/teams/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, PUBLIC_READ_PATHS).permitAll()
+                        // HEAD is GET without a body, but Spring treats it as a
+                        // separate method — so without this an uptime monitor or
+                        // link preview hitting a public endpoint gets a 401 and
+                        // reports the site as broken.
+                        .requestMatchers(HttpMethod.HEAD, PUBLIC_READ_PATHS).permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         // Spring forwards unhandled exceptions to /error. That
                         // dispatch skips the auth filters, so securing it turns
                         // every server error into a misleading empty 401.
                         .requestMatchers("/error").permitAll()
-                        // Lets the UI decide whether to offer League features
-                        // before anyone has signed in.
-                        .requestMatchers(HttpMethod.GET, "/api/riot/status").permitAll()
                         // Reports 401 itself, with a body the frontend reads.
                         .requestMatchers("/api/me").permitAll()
                         // Login endpoints must stay reachable while signed out.
