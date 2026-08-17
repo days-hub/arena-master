@@ -11,6 +11,13 @@ Brackets are game-agnostic — League, Overwatch, Marvel Rivals, Valorant and th
 all run the same way. Sign in with Discord to organize; anyone can watch without an
 account.
 
+> **The live site is a demo.** It runs on seeded tournament data so there is
+> something to look at, and sign-in is Discord OAuth scoped to one community
+> server — browse anything, but creating a tournament needs an account in that
+> guild. Open sign-up and self-serve Discord setup are next; today this is a
+> feature showcase rather than a product another server can adopt. The
+> [limitations](#known-limitations) below say exactly where the line is.
+
 ![Tournament dashboard](docs/screenshots/dashboard.png)
 
 ## Features
@@ -48,7 +55,10 @@ a different page.
 ![Standings](docs/screenshots/standings.png)
 
 **Player careers** — every signed-in player gets a record: teams, appearances,
-titles, recent matches and achievements earned through competing.
+titles, recent matches and achievements earned through competing, plus the linked
+Discord and Riot identities behind it.
+
+![Player profile](docs/screenshots/profile.png)
 
 **Discord bot** — create tournaments, register teams and record results from chat.
 It authenticates with a service key plus the Discord id of whoever typed the
@@ -165,6 +175,13 @@ it entered had finished.
 **Ranked lookups go by PUUID.** The `by-summoner` endpoint most guides still show was
 removed by Riot in June 2025 along with the rest of the encrypted-summoner-id surface.
 
+**Deploys carry no long-lived credentials, and the instance takes no inbound SSH.**
+GitHub Actions assumes an AWS role through OIDC — nothing is stored in repository
+secrets — and the rollout runs over Systems Manager rather than SSH. That switch was
+forced: GitHub's runners have no fixed egress addresses, so allow-listing them would
+have meant opening port 22 to the internet. The SSM agent connects outbound instead,
+and the security group stays closed.
+
 ## Known limitations
 
 **Single-tenant.** The Discord guild, webhook and admin list are per-deployment
@@ -179,13 +196,16 @@ so there are a few seconds of downtime. Backups are a cron job, not a managed se
 
 ## Roadmap
 
+- **Open sign-up and self-serve setup** — the demo caveat above, closed. Discord's
+  `webhook.incoming` scope creates the announcement webhook during install, so a
+  server joins by authorizing the app rather than by pasting a URL into someone's
+  `.env`, and creation is gated per guild instead of on one.
 - **Tournament codes** — generate a Riot tournament code per match so results are
   reported back automatically and the bracket advances with nobody clicking. Needs a
   Riot production key; custom games are invisible to the standard API, so this is the
   only sanctioned route.
 - **Discord-native reporting** — the bot posts each match with winner buttons, so
   results are one tap from a phone. Works for every game, not just League.
-- Multi-tenancy, as above
 - Double elimination, per-tournament match history, result correction
 
 ---
