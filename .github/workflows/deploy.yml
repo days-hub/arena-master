@@ -14,6 +14,16 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # A rollout restarts the containers, so the site blinks. Documentation
+    # cannot change what runs there, and skipping those pushes avoids taking
+    # a few seconds of downtime to publish a README edit. A commit touching
+    # both code and docs still deploys — this only skips when every changed
+    # file matches.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
   workflow_dispatch:
 
 jobs:
