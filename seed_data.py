@@ -29,12 +29,32 @@ so Turbo Geese always take Demo Worlds 2026.
 """
 import argparse
 import json
+import os
+import pathlib
 import sys
 import urllib.error
 import urllib.request
 from urllib.parse import quote
 
+# Filled in by main() from arguments and the environment.
 API = "http://localhost:8000/api"
+SERVICE_KEY = ""
+ACTING_USER = ""
+
+
+def load_env(path):
+    """Read KEY=VALUE lines from a .env file, ignoring comments and blanks."""
+    values = {}
+    env_file = pathlib.Path(path)
+    if not env_file.exists():
+        return values
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
 
 TEAMS_8 = ["Krakens", "Night Owls", "Iron Wolves", "Solar Flare",
            "Void Walkers", "Maple Syndicate", "Frostbite", "Turbo Geese"]
@@ -54,6 +74,13 @@ def call(method, path, body=None):
     if body is not None:
         data = json.dumps(body).encode()
         req.add_header("Content-Type", "application/json")
+    # Same credentials the Discord bot uses: the service key proves the caller
+    # is trusted, and the acting-user header decides whose permissions apply.
+    # Seeded tournaments are therefore owned by a real account rather than
+    # appearing from nowhere.
+    if SERVICE_KEY:
+        req.add_header("X-Service-Key", SERVICE_KEY)
+        req.add_header("X-Acting-User", ACTING_USER)
     try:
         with urllib.request.urlopen(req, data) as r:
             raw = r.read()
@@ -162,10 +189,33 @@ def demo_tournaments():
 
 
 def main():
+    global API, SERVICE_KEY, ACTING_USER
+
     parser = argparse.ArgumentParser(description="Seed Arena Master demo data")
     parser.add_argument("--reset", action="store_true",
                         help="remove existing demo data before seeding")
+    parser.add_argument("--api", default="http://localhost:8000/api",
+                        help="API base URL, e.g. https://arena.bortle.app/api")
+    parser.add_argument("--env", default=".env",
+                        help="file to read ARENA_SERVICE_KEY and ADMIN_DISCORD_IDS from")
+    parser.add_argument("--as-user", dest="as_user",
+                        help="Discord id to act as; defaults to the first ADMIN_DISCORD_IDS entry")
     args = parser.parse_args()
+
+    API = args.api.rstrip("/")
+    env = load_env(args.env)
+    # Real environment variables win, so a deployed key can be supplied without
+    # editing the local .env.
+    SERVICE_KEY = os.environ.get("ARENA_SERVICE_KEY", env.get("ARENA_SERVICE_KEY", ""))
+    admin_ids = os.environ.get("ADMIN_DISCORD_IDS", env.get("ADMIN_DISCORD_IDS", ""))
+    ACTING_USER = args.as_user or admin_ids.split(",")[0].strip()
+
+    if not SERVICE_KEY or not ACTING_USER:
+        sys.exit(
+            "Seeding needs credentials: creating tournaments requires an account.\n"
+            "Set ARENA_SERVICE_KEY and ADMIN_DISCORD_IDS (in .env or the environment),\n"
+            "and make sure that Discord user has signed in to this deployment at least once."
+        )
 
     try:
         existing = demo_tournaments()
