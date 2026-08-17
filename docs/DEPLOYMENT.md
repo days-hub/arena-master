@@ -377,10 +377,29 @@ docker compose -f compose.prod.yaml logs -f frontend
 **Back up the database** — nothing does this for you:
 
 ```bash
-docker exec arena-db pg_dump -U arena arenamaster | gzip > backup-$(date +%F).sql.gz
+mkdir -p ~/backups
+docker exec arena-db pg_dump -U arena arenamaster | gzip > ~/backups/arena-$(date +%F).sql.gz
 ```
 
-Worth a cron entry, and worth copying off the instance.
+To run it nightly, note that Amazon Linux 2023 has no cron installed — it favours
+systemd timers, so `crontab` is missing until you add it:
+
+```bash
+sudo dnf install -y cronie
+sudo systemctl enable --now crond
+
+cat <<'EOF' | crontab -
+0 3 * * * docker exec arena-db pg_dump -U arena arenamaster | gzip > ~/backups/arena-$(date +\%F).sql.gz 2>>~/backups/backup.log
+0 4 * * 0 find ~/backups -name 'arena-*.sql.gz' -mtime +14 -delete
+EOF
+```
+
+Run the dump by hand once afterwards to confirm it produces a non-empty file;
+a backup job first discovered to be broken during a restore is not a backup.
+
+These stay on the same disk as the database, so they cover a bad migration or a
+dropped table, not a lost volume. Copying them to S3 would close that gap for a
+few cents a month.
 
 **Restore**
 
