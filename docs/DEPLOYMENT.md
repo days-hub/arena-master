@@ -356,6 +356,26 @@ with the repository, pointed at the deployed API.
 
 Deliberate, and worth being able to explain rather than pretending otherwise:
 
+- **The deployment is single-tenant.** `DISCORD_GUILD_ID`, `DISCORD_WEBHOOK_URL`
+  and `ADMIN_DISCORD_IDS` are one-per-deployment environment variables, and
+  `AccessControl.requireGuildMember()` gates creation on membership of that one
+  guild. So a visitor from outside that Discord server can browse brackets and
+  standings but cannot create anything. That is intentional for a community
+  tool and for a public demo, but it does mean this is not a product other
+  servers can sign up for.
+
+  Making it multi-tenant is a known path rather than an open question:
+
+  1. A `discord_guilds` table holding each installation's guild id, name and
+     webhook URL.
+  2. An install flow using Discord's `webhook.incoming` OAuth scope. Discord
+     presents a server and channel picker during authorization, creates the
+     webhook itself, and returns its URL in the token response — so nobody
+     ever copies a webhook URL by hand.
+  3. `guild_id` on tournaments and teams, so each server sees its own.
+  4. Permission checks against the tournament's guild rather than a global
+     one, and `DiscordNotifier` resolving the webhook per tournament.
+
 - **No redundancy.** One instance. It reboots, the site is briefly down.
 - **Backups are manual** unless you add the cron job above.
 - **A deploy has a few seconds of downtime** while the containers restart.
