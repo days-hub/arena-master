@@ -1,115 +1,178 @@
 # Arena Master
 
-A full-stack tournament management platform for organizing and running single-elimination esports brackets — with a live web dashboard, click-to-record bracket progression, all-time standings, and Discord integration that announces results to your server as they happen.
+**[arena.bortle.app](https://arena.bortle.app)** · a tournament platform for a Discord gaming community
 
-Built with **Spring Boot + PostgreSQL** on the backend, **React + Material UI** on the frontend, and a **discord.py** bot for chat-based control.
+Run single-elimination esports brackets end to end: create a tournament, register
+teams, generate the draw, and record results as games finish. The bracket advances
+itself, standings update, and Discord gets told about it — whether the result was
+entered on the web or through the bot.
+
+Sign in with Discord to organize. Anyone can watch without an account.
 
 ![Tournament dashboard](docs/screenshots/dashboard.png)
 
 ## Features
 
-**Tournament dashboard** — every tournament at a glance: live status (Created / Ongoing / Completed), round progress, match completion, and the champion once it's decided. One click into any bracket.
+**Tournament dashboard** — every competition at a glance: status, round progress,
+match completion and the champion once decided.
 
-**Interactive bracket** — a pannable, zoomable single-elimination bracket rendered with [@g-loot/react-tournament-brackets](https://github.com/g-loot/react-tournament-brackets). Click any pending match to record a game result; series scores update live, and when a round completes the next round is generated automatically. Best-of-1/3/5 formats supported, with series scoring handled server-side.
+**Interactive bracket** — pannable, zoomable, rendered with
+[@g-loot/react-tournament-brackets](https://github.com/g-loot/react-tournament-brackets).
+Click a pending match to record a game; series scores update live, and completing a
+round generates the next one automatically. Bo1/3/5/7, scored server-side.
 
 ![Interactive bracket](docs/screenshots/bracket.png)
 
-**All-time standings** — aggregate team records across every tournament: titles, match win/loss, game win/loss, and game win rate, in a sortable table.
+**Discord sign-in and permissions** — OAuth login, with creation limited to members
+of the community's Discord server. Tournaments belong to whoever created them; only
+that person or an admin can generate the bracket, record results, or delete it.
+
+**Discord announcements** — results are announced as they happen, in order, from the
+backend — so the bot, the web UI and the API all produce the same notifications
+rather than only the browser doing it.
+
+**League of Legends profiles** — link a Riot ID to show rank and level on team
+rosters. Cached and refreshed on a cooldown, so a roster page costs no Riot API
+calls.
+
+**All-time standings** — titles, match and game records aggregated across every
+tournament.
 
 ![Standings](docs/screenshots/standings.png)
 
-**Discord integration** — results recorded on the web are announced to your Discord server via webhook ("Krakens take Game 2, winning Match 1 with a score of 2-0!"), and a companion bot allows tournament control from chat. The web app works fully without Discord configured — notifications are best-effort.
+**Discord bot** — create tournaments, register teams and record results from chat.
+It authenticates with a service key plus the Discord id of whoever typed the
+command, so bot actions obey exactly the same permission rules as the web UI.
 
-**Demo data seeder** — `seed_data.py` populates the app with four tournaments covering every state (completed with champion, mid-bracket, mid-series, and not yet started) so you can explore the full UI immediately. It drives the real HTTP API, so it works against any running backend.
+## Architecture
 
-## Stack
+```
+                    arena.bortle.app
+                           │
+                    CloudFront  ── TLS (ACM), CDN, origin locked to CloudFront
+                           │
+                    EC2 t4g.small (ARM)
+                           │
+                    Docker Compose
+                    ├── nginx        serves the React build, proxies /api
+                    ├── Spring Boot  the API
+                    └── PostgreSQL   EBS-backed volume
 
-| Layer    | Tech                                                          |
-| -------- | ------------------------------------------------------------- |
-| Backend  | Spring Boot 4 (Java 25), Spring Data JPA, PostgreSQL, Flyway  |
-| Frontend | React 18, Material UI 5, React Router, Axios                  |
-| Bracket  | @g-loot/react-tournament-brackets                             |
-| Bot      | discord.py, Discord webhooks                                  |
+GitHub Actions ── build (ARM runners) → GHCR → pull & restart over SSH → health check
+```
 
-## Getting started
+nginx is the only public entry point and proxies `/api`, `/oauth2`, `/login` and
+`/actuator` to the backend, so the browser sees a single origin — no CORS, and a
+same-site session cookie. The database is reachable only on the Compose network.
 
-Requires **JDK 25**, **Docker Desktop** (for PostgreSQL), **Node 18+**, and **Python 3.12+** (seeder + Discord bot only).
+| Layer | Tech |
+| ----- | ---- |
+| Backend | Spring Boot 4, Java 25, Spring Security, Spring Data JPA, Flyway |
+| Database | PostgreSQL 18 |
+| Frontend | React 18, Material UI 5, React Router, Axios |
+| Bot | discord.py |
+| Infrastructure | AWS EC2 + CloudFront + ACM, Docker Compose, nginx |
+| CI/CD | GitHub Actions, GHCR |
+| Integrations | Discord OAuth2 + webhooks, Riot Games API |
+
+## Running it locally
+
+Requires **JDK 25**, **Docker Desktop**, **Node 18+**, and **Python 3.12+** for the
+seeder and bot.
 
 ```bash
 git clone https://github.com/days-hub/arena-master.git
 cd arena-master
+cp .env.example .env      # fill in what you have; everything is optional
 ```
 
-**1. Backend**
+**Backend** — one command starts PostgreSQL via Docker Compose, applies the Flyway
+migrations and serves the API:
 
 ```bash
 cd springboot-server
-./mvnw spring-boot:run         # http://localhost:8000
+./mvnw spring-boot:run            # http://localhost:8000
 ```
 
-That single command builds the app, starts PostgreSQL via Docker Compose,
-applies the Flyway schema migrations, and serves the API. No local Maven or
-Postgres install needed.
-
-**2. Frontend** (separate terminal)
+**Frontend**, in another terminal:
 
 ```bash
 cd frontend
 npm install
-npm start                      # http://localhost:3000
+npm start                         # http://localhost:3000
 ```
 
-**3. Demo data** (optional, from the project root, with the backend running)
+**Demo data**, once both are running:
 
 ```bash
-python seed_data.py            # seed four demo tournaments
-python seed_data.py --reset    # wipe demo data and re-seed fresh
+python seed_data.py               # four tournaments covering every UI state
+python seed_data.py --reset       # wipe and re-seed
 ```
 
-**4. Discord** (optional)
+Every integration degrades rather than breaks. No Discord credentials means no login
+and no announcements; no Riot key means `/api/riot/status` reports `enabled: false`
+and the UI hides those features. The app runs regardless.
 
-Copy `.env.example` to `.env` and set `DISCORD_WEBHOOK_URL` (for result announcements) and bot credentials if running the chat bot. Without it, everything works — the server just logs that notifications are skipped.
+## Deploying
 
-## How a tournament runs
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the full runbook — instance setup, DNS,
+CloudFront, CloudWatch, backups, and the cost breakdown (about **$14/month**).
 
-1. **Create** a tournament (name, game, bo1/bo3/bo5) on the Tournament Creation page
-2. **Register** a power-of-two number of teams (2, 4, 8, ...)
-3. **Generate** the bracket — round 1 pairings are shuffled and created
-4. **Click matches** on the bracket to record game results; each click records one game of the series. When a match reaches its winning score, the victor advances; when a round completes, the next round spawns automatically
-5. **Finish** — the final's winner is crowned, the dashboard shows the champion, and standings update with the title
+Pushing to `main` builds both images on ARM runners, publishes them to GHCR, pulls
+and restarts them on the instance, and **fails the run if the site doesn't come back
+healthy**.
 
-## API highlights
+## Some decisions worth explaining
 
-| Endpoint                                              | Purpose                                  |
-| ----------------------------------------------------- | ---------------------------------------- |
-| `GET /api/tournaments/overview`                       | Dashboard summary per tournament         |
-| `GET /api/standings`                                  | All-time aggregate team records          |
-| `POST /api/tournaments/{name}/generate_and_list_matches` | Generate bracket (idempotent; `?force=true` to regenerate) |
-| `POST /api/tournaments/{name}/record_match_result`    | Record one game; advances rounds         |
-| `GET /api/tournaments/by_name/{name}`                 | Tournament with full match data          |
+**The backend was ported from FastAPI to Spring Boot with a byte-identical API.**
+A [diff harness](https://github.com/days-hub/arena-master/commits/main) drove both
+servers through the same 71 requests — reads, writes, error cases, a full tournament
+lifecycle — and compared parsed JSON. The React app and the bot needed no changes.
 
-## Notes for developers
+**EC2 with Docker Compose, not App Runner.** App Runner was the obvious choice until
+the networking: reaching a private RDS needs a VPC connector, which routes *all*
+outbound traffic through the VPC, so the calls to Discord and Riot would have needed
+a NAT Gateway at ~$32/month — more than the rest of the stack combined. One instance
+running Compose avoids that and a load balancer. The trade is real: no redundancy,
+and backups are mine to run.
 
-- The backend lives in `springboot-server/` — controllers (`web/`), business
-  logic (`service/`), JPA entities (`domain/`), Spring Data repositories
-  (`repository/`), and API request/response records (`dto/`).
-- The database schema is owned by Flyway
-  (`src/main/resources/db/migration/`); Hibernate runs in `validate` mode and
-  never alters tables.
-- Config follows 12-factor: Discord credentials and CORS origins come from
-  properties overridable by env vars (`DISCORD_BOT_TOKEN`,
-  `DISCORD_GUILD_ID`, `DISCORD_WEBHOOK_URL`), and the repo-root `.env` is
-  read automatically in dev.
-- Migrating data from a pre-2026 SQLite install:
-  `python springboot-server/scripts/migrate_sqlite_to_postgres.py | docker exec -i arena-master-db psql -U arena -d arenamaster -v ON_ERROR_STOP=1`
+**Discord ids are strings in JSON.** Snowflakes exceed JavaScript's
+`Number.MAX_SAFE_INTEGER`, so as JSON numbers they were silently losing precision in
+the browser.
+
+**Notifications are backend-driven and ordered.** They were sent by the React app,
+which meant anything done through the bot or the API announced nothing. They now
+publish on transaction commit, delivered by a single-threaded executor — the default
+async pool raced, and a channel could show a team registering *after* the tournament
+it entered had finished.
+
+**Ranked lookups go by PUUID.** The `by-summoner` endpoint most guides still show was
+removed by Riot in June 2025 along with the rest of the encrypted-summoner-id surface.
+
+## Known limitations
+
+**Single-tenant.** The Discord guild, webhook and admin list are per-deployment
+environment variables, and creation is gated on membership of that one guild — so
+visitors from other servers get a read-only view. Right for a community tool, not a
+product other servers can sign up for. The route to multi-tenancy is Discord's
+`webhook.incoming` scope for install-time webhook creation, plus guild-scoped
+ownership on tournaments and teams.
+
+**One instance.** It reboots, the site is briefly down. Deploys restart containers,
+so there are a few seconds of downtime. Backups are a cron job, not a managed service.
 
 ## Roadmap
 
-- **Riot API integration** — players link Riot IDs, and match results are ingested automatically from custom games via Match-V5 (with Tournament-V5 codes/callbacks as a stretch goal)
-- Match history view and per-team result logs
-- Double-elimination support
-- Result correction / undo
+- **Tournament codes** — generate a Riot tournament code per match so results are
+  reported back automatically and the bracket advances with nobody clicking. Needs a
+  Riot production key; custom games are invisible to the standard API, so this is the
+  only sanctioned route.
+- **Discord-native reporting** — the bot posts each match with winner buttons, so
+  results are one tap from a phone. Works for every game, not just League.
+- Multi-tenancy, as above
+- Double elimination, match history, result correction
 
 ---
 
-*Built by [Ben Walsh](https://www.linkedin.com/in/ben-walsh-7570aa109/) — see also [astroplanner](https://github.com/days-hub/astroplanner).*
+*Built by [Ben Walsh](https://www.linkedin.com/in/ben-walsh-7570aa109/) — see also
+[astroplanner](https://github.com/days-hub/astroplanner).*
