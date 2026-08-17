@@ -25,6 +25,18 @@ account.
 **Tournament dashboard** — live competitions front and centre, with the current
 matchups on deck, round progress, and the champion once one is crowned.
 
+**Start a competition in four fields** — name, game, series format, create. Every
+tournament is then listed with its field, round progress and champion, so the state
+of the whole season reads at a glance.
+
+![Tournament management](docs/screenshots/tournaments.png)
+
+**Rosters built from Discord** — pick players straight from the server's member list
+rather than typing names, then enter the finished roster into a tournament. The
+directory flags which teams are ready and which still need players.
+
+![Teams and registration](docs/screenshots/teams.png)
+
 **Interactive bracket** — the full championship path with named rounds, live series
 scores, and placeholders showing which seat is still awaiting a winner. Click a
 pending match to record a game; when a round completes the next one is generated
