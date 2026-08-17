@@ -17,10 +17,10 @@ public class RootController {
 
     @GetMapping("/api/games")
     public List<String> listGames() {
-        return List.of("Valorant", "Mario Kart", "Overwatch", "Fortnite", "League of Legends",
-                "Apex Legends", "Minecraft", "CS:GO", "Rainbow Six Siege", "PUBG",
+        return List.of("Valorant", "Mario Kart", "Overwatch", "Marvel Rivals", "Fortnite", "League of Legends",
+                "Apex Legends", "Minecraft", "Counter-Strike 2", "Rainbow Six Siege", "PUBG",
                 "Dota 2", "World of Warcraft", "Hearthstone", "Rocket League", "Smite",
-                "Paladins", "Heroes of the Storm", "Starcraft II", "Diablo III",
-                "Warcraft III", "Starcraft: Remastered", "HOTS", "SC2", "D3", "WC3", "SCR");
+                "Paladins", "Heroes of the Storm", "Starcraft II", "Diablo IV",
+                "Warcraft III", "Starcraft: Remastered");
     }
 }

@@ -71,7 +71,7 @@ public class SecurityConfig {
                         // Reading a bracket, the standings or the dashboard
                         // stays open to anyone — spectators don't sign in.
                         .requestMatchers(HttpMethod.GET,
-                                "/", "/api/games", "/api/tournaments/**", "/api/standings",
+                                "/", "/api/games", "/api/tournaments/**", "/api/standings", "/api/standings/**",
                                 "/api/teams", "/api/teams/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         // Spring forwards unhandled exceptions to /error. That

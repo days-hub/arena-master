@@ -7,21 +7,26 @@ teams, generate the draw, and record results as games finish. The bracket advanc
 itself, standings update, and Discord gets told about it — whether the result was
 entered on the web or through the bot.
 
-Sign in with Discord to organize. Anyone can watch without an account.
+Brackets are game-agnostic — League, Overwatch, Marvel Rivals, Valorant and the rest
+all run the same way. Sign in with Discord to organize; anyone can watch without an
+account.
 
 ![Tournament dashboard](docs/screenshots/dashboard.png)
 
 ## Features
 
-**Tournament dashboard** — every competition at a glance: status, round progress,
-match completion and the champion once decided.
+**Tournament dashboard** — live competitions front and centre, with the current
+matchups on deck, round progress, and the champion once one is crowned.
 
-**Interactive bracket** — pannable, zoomable, rendered with
-[@g-loot/react-tournament-brackets](https://github.com/g-loot/react-tournament-brackets).
-Click a pending match to record a game; series scores update live, and completing a
-round generates the next one automatically. Bo1/3/5/7, scored server-side.
+**Interactive bracket** — the full championship path with named rounds, live series
+scores, and placeholders showing which seat is still awaiting a winner. Click a
+pending match to record a game; when a round completes the next one is generated
+automatically. Bo1/3/5/7, scored server-side.
 
 ![Interactive bracket](docs/screenshots/bracket.png)
+
+**Spectators need no account.** Brackets, standings and tournament history are
+public; signing in is only required to run something.
 
 **Discord sign-in and permissions** — OAuth login, with creation limited to members
 of the community's Discord server. Tournaments belong to whoever created them; only
@@ -35,10 +40,15 @@ rather than only the browser doing it.
 rosters. Cached and refreshed on a cooldown, so a roster page costs no Riot API
 calls.
 
-**All-time standings** — titles, match and game records aggregated across every
-tournament.
+**All-time standings** — a podium of the strongest records plus a full leaderboard
+with titles, win streaks, recent form and game win rate. Scopeable by game,
+tournament or season, so "best Overwatch team this season" is a filter rather than
+a different page.
 
 ![Standings](docs/screenshots/standings.png)
+
+**Player careers** — every signed-in player gets a record: teams, appearances,
+titles, recent matches and achievements earned through competing.
 
 **Discord bot** — create tournaments, register teams and record results from chat.
 It authenticates with a service key plus the Discord id of whoever typed the
@@ -170,7 +180,7 @@ so there are a few seconds of downtime. Backups are a cron job, not a managed se
 - **Discord-native reporting** — the bot posts each match with winner buttons, so
   results are one tap from a phone. Works for every game, not just League.
 - Multi-tenancy, as above
-- Double elimination, match history, result correction
+- Double elimination, per-tournament match history, result correction
 
 ---
 

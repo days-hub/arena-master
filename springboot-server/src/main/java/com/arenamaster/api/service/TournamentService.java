@@ -9,6 +9,7 @@ import com.arenamaster.api.dto.MatchResultRequest;
 import com.arenamaster.api.dto.MatchView;
 import com.arenamaster.api.dto.ParticipantView;
 import com.arenamaster.api.dto.RegisterTeamRequest;
+import com.arenamaster.api.dto.StandingsOptions;
 import com.arenamaster.api.dto.TeamStanding;
 import com.arenamaster.api.dto.TournamentCreateRequest;
 import com.arenamaster.api.dto.TournamentOverview;
@@ -25,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.Year;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,6 +34,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -73,7 +76,11 @@ public class TournamentService {
     public TournamentResponse get(Long id) {
         Tournament t = tournaments.findById(id)
                 .orElseThrow(() -> new ApiException(404, "Tournament not found"));
-        return summaryResponse(t);
+        List<MatchView> views = matches.findByTournamentIdOrderById(t.getId()).stream()
+                .map(this::toMatchView)
+                .toList();
+        return new TournamentResponse(t.getId(), t.getName(), t.getGame(), t.getFormat(), t.getStatus(),
+                t.teamNames(), views);
     }
 
     public TournamentResponse create(TournamentCreateRequest request) {
@@ -327,11 +334,39 @@ public class TournamentService {
     }
 
     @Transactional(readOnly = true)
-    public List<TeamStanding> standings() {
-        List<Match> allMatches = matches.findAll(Sort.by("id"));
-        List<Tournament> all = tournaments.findAll(Sort.by("id"));
+    public StandingsOptions standingsOptions() {
+        List<Tournament> all = tournaments.findAll(Sort.by(Sort.Direction.DESC, "id"));
+        List<String> games = all.stream()
+                .map(Tournament::getGame)
+                .filter(game -> game != null && !game.isBlank())
+                .distinct()
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .toList();
+        List<Integer> seasons = all.stream()
+                .map(this::seasonOf)
+                .distinct()
+                .sorted(Comparator.reverseOrder())
+                .toList();
+        List<StandingsOptions.TournamentOption> options = all.stream()
+                .map(t -> new StandingsOptions.TournamentOption(t.getId(), t.getName(), t.getGame(), seasonOf(t)))
+                .toList();
+        return new StandingsOptions(games, options, seasons);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TeamStanding> standings(String game, Long tournamentId, Integer season) {
+        List<Tournament> all = tournaments.findAll(Sort.by("id")).stream()
+                .filter(t -> tournamentId == null || t.getId().equals(tournamentId))
+                .filter(t -> game == null || game.isBlank() || game.equalsIgnoreCase(t.getGame()))
+                .filter(t -> season == null || seasonOf(t) == season)
+                .toList();
+        Set<Long> tournamentIds = all.stream().map(Tournament::getId).collect(Collectors.toSet());
+        List<Match> allMatches = matches.findAll(Sort.by("id")).stream()
+                .filter(match -> tournamentIds.contains(match.getTournament().getId()))
+                .toList();
 
         Map<String, TeamStanding> stats = new LinkedHashMap<>();
+        Map<String, List<String>> form = new LinkedHashMap<>();
         for (Match m : allMatches) {
             String a = m.getTeamA();
             String b = m.getTeamB();
@@ -348,8 +383,21 @@ public class TournamentService {
             // Matches only count once decided.
             if (hasWinner(m.getWinner())) {
                 String loser = m.getWinner().equals(a) ? b : a;
-                stats.computeIfAbsent(m.getWinner(), TeamStanding::new).matchWins++;
+                TeamStanding winnerStanding = stats.computeIfAbsent(m.getWinner(), TeamStanding::new);
+                winnerStanding.matchWins++;
                 stats.computeIfAbsent(loser, TeamStanding::new).matchLosses++;
+                form.computeIfAbsent(m.getWinner(), ignored -> new ArrayList<>()).add("W");
+                form.computeIfAbsent(loser, ignored -> new ArrayList<>()).add("L");
+
+                List<String> seeds = m.getTournament().teamNames();
+                int winnerSeed = seeds.indexOf(m.getWinner()) + 1;
+                int loserSeed = seeds.indexOf(loser) + 1;
+                int seedGap = winnerSeed > loserSeed && loserSeed > 0 ? winnerSeed - loserSeed : 0;
+                if (seedGap > winnerStanding.biggestUpsetSeedGap) {
+                    winnerStanding.biggestUpsetSeedGap = seedGap;
+                    winnerStanding.biggestUpset = "Beat #%d %s as the #%d seed"
+                            .formatted(loserSeed, loser, winnerSeed);
+                }
             }
         }
 
@@ -367,12 +415,30 @@ public class TournamentService {
             }
         }
 
+        form.forEach((team, results) -> {
+            TeamStanding standing = stats.computeIfAbsent(team, TeamStanding::new);
+            int recentStart = Math.max(0, results.size() - 5);
+            standing.recentForm = new ArrayList<>(results.subList(recentStart, results.size()));
+            if (!results.isEmpty()) {
+                String latest = results.get(results.size() - 1);
+                int length = 1;
+                for (int index = results.size() - 2; index >= 0 && results.get(index).equals(latest); index--) {
+                    length++;
+                }
+                standing.streak = latest + length;
+            }
+        });
+
         List<TeamStanding> standings = new ArrayList<>(stats.values());
         standings.sort(Comparator.comparingInt((TeamStanding s) -> s.titles)
                 .thenComparingInt(s -> s.matchWins)
                 .thenComparingInt(s -> s.gameWins)
                 .reversed());
         return standings;
+    }
+
+    private int seasonOf(Tournament tournament) {
+        return tournament.getCreatedAt() == null ? Year.now().getValue() : tournament.getCreatedAt().getYear();
     }
 
     // ---------- Helpers ----------

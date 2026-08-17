@@ -191,7 +191,56 @@ textarea {
   height: 100%;
   transform-origin: 50% 65%;
   filter: saturate(.9) contrast(1.03) drop-shadow(0 10px 12px rgba(0,0,0,.28));
-  animation: game-art-float 4.4s ease-in-out infinite;
+  animation: game-art-enter .55s ease-out both, game-art-float 4.4s .55s ease-in-out infinite;
+}
+
+.game-art-pagination {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 9px;
+  display: flex;
+  gap: 0;
+  transform: translateX(-50%);
+}
+
+.game-art-dot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.game-art-dot::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.46);
+  box-shadow: 0 1px 4px rgba(0,0,0,.28);
+  transition: width 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+.game-art-dot:hover::after,
+.game-art-dot:focus-visible::after {
+  transform: scale(1.35);
+  background: rgba(255,255,255,.78);
+}
+
+.game-art-dot:focus-visible {
+  outline: 2px solid var(--game-accent);
+  outline-offset: -5px;
+  border-radius: 999px;
+}
+
+.game-art-dot--active::after {
+  width: 16px;
+  background: var(--game-accent);
 }
 
 .game-art-vignette {
@@ -771,6 +820,11 @@ textarea {
 @keyframes game-art-float {
   0%, 100% { transform: translateY(2px) scale(var(--game-art-scale, 1)); }
   50% { transform: translateY(-5px) scale(calc(var(--game-art-scale, 1) + .025)); }
+}
+
+@keyframes game-art-enter {
+  from { opacity: 0; filter: saturate(.75) contrast(1.03) blur(4px); }
+  to { opacity: 1; filter: saturate(.9) contrast(1.03) blur(0); }
 }
 
 @keyframes game-art-shadow {

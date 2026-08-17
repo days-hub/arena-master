@@ -19,6 +19,7 @@ export const getApiErrorMessage = (error, fallback = 'Something went wrong. Plea
 
 export const getDiscordLoginUrl = () => `${API_ORIGIN}/oauth2/authorization/discord`;
 export const fetchCurrentUser = () => api.get('/me');
+export const fetchCareerProfile = () => api.get('/me/career');
 export const logout = () => api.post('/logout');
 export const createTournament = (data) => api.post('/tournaments', data);
 export const updateTournament = (id, data) => api.put(`/tournaments/${id}`, data);
@@ -28,6 +29,7 @@ export const recordMatchResult = (name, data) => api.post(`/tournaments/${encode
 export const recordSubmatchResult = (name, data) => api.post(`/tournaments/${encodeURIComponent(name)}/record_submatch_result`, data);
 export const fetchTournaments = () => api.get('/tournaments');
 export const fetchTournamentsOverview = () => api.get('/tournaments/overview');
+export const fetchTournamentById = (id) => api.get(`/tournaments/${id}`);
 export const fetchTournamentByName = (name) => api.get(`/tournaments/by_name/${encodeURIComponent(name)}`);
 export const deleteTournament = (id) => api.delete(`/tournaments/${id}`);
 export const generateAndListMatches = (name, force = false) =>
@@ -46,7 +48,8 @@ export const deleteTeam = (id) => api.delete(`/teams/${id}`);
 export const addMemberToTeam = (teamId, memberId) => api.post('/teams/add_member', { team_id: teamId, member_id: memberId });
 export const removeMemberFromTeam = (teamId, memberId) => api.delete(`/teams/${teamId}/members/${memberId}`);
 export const fetchDiscordMembers = () => api.get('/discord/members');
-export const fetchStandings = () => api.get('/standings');
+export const fetchStandings = (params) => api.get('/standings', { params });
+export const fetchStandingsOptions = () => api.get('/standings/options');
 
 // League of Legends. /riot/status is public so the UI can hide these
 // features entirely when the server has no Riot API key configured.

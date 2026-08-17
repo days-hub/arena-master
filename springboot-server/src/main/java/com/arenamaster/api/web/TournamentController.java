@@ -2,6 +2,7 @@ package com.arenamaster.api.web;
 
 import com.arenamaster.api.dto.MatchResultRequest;
 import com.arenamaster.api.dto.RegisterTeamRequest;
+import com.arenamaster.api.dto.StandingsOptions;
 import com.arenamaster.api.dto.TeamStanding;
 import com.arenamaster.api.dto.TournamentCreateRequest;
 import com.arenamaster.api.dto.TournamentOverview;
@@ -43,8 +44,15 @@ public class TournamentController {
     }
 
     @GetMapping("/api/standings")
-    public List<TeamStanding> standings() {
-        return service.standings();
+    public List<TeamStanding> standings(@RequestParam(required = false) String game,
+                                        @RequestParam(required = false) Long tournamentId,
+                                        @RequestParam(required = false) Integer season) {
+        return service.standings(game, tournamentId, season);
+    }
+
+    @GetMapping("/api/standings/options")
+    public StandingsOptions standingsOptions() {
+        return service.standingsOptions();
     }
 
     @GetMapping("/api/tournaments/{id}")

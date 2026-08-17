@@ -1,7 +1,9 @@
 package com.arenamaster.api.web;
 
 import com.arenamaster.api.dto.CurrentUserView;
+import com.arenamaster.api.dto.CareerProfileView;
 import com.arenamaster.api.security.CurrentUser;
+import com.arenamaster.api.service.ProfileService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -10,9 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final CurrentUser currentUser;
+    private final ProfileService profiles;
 
-    public AuthController(CurrentUser currentUser) {
+    public AuthController(CurrentUser currentUser, ProfileService profiles) {
         this.currentUser = currentUser;
+        this.profiles = profiles;
     }
 
     /**
@@ -25,5 +29,10 @@ public class AuthController {
                 .map(u -> ResponseEntity.ok(new CurrentUserView(
                         u.getId(), u.getDiscordId(), u.getUsername(), u.getAvatarUrl(), u.isAdmin())))
                 .orElseGet(() -> ResponseEntity.status(401).build());
+    }
+
+    @GetMapping("/api/me/career")
+    public CareerProfileView career() {
+        return profiles.career();
     }
 }

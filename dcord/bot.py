@@ -238,7 +238,7 @@ tournaments = {}  # Store tournament objects by name
 
 formats = ['bo1', 'bo3', 'bo5']  # Predefined formats
 # Predefined list of games
-games = ['Valorant', 'Mario Kart', 'Overwatch', 'Fortnite', 'League of Legends', 'Apex Legends', 'Minecraft', 'CS:GO', 'Rainbow Six Siege', 'PUBG', 'Dota 2', 'World of Warcraft', 'Hearthstone', 'Rocket League', 'Smite', 'Paladins', 'Heroes of the Storm', 'Starcraft II', 'Diablo III', 'Warcraft III', 'Starcraft: Remastered', 'HOTS', 'SC2', 'D3', 'WC3', 'SCR']
+games = ['Valorant', 'Mario Kart', 'Overwatch', 'Marvel Rivals', 'Fortnite', 'League of Legends', 'Apex Legends', 'Minecraft', 'Counter-Strike 2', 'Rainbow Six Siege', 'PUBG', 'Dota 2', 'World of Warcraft', 'Hearthstone', 'Rocket League', 'Smite', 'Paladins', 'Heroes of the Storm', 'Starcraft II', 'Diablo IV', 'Warcraft III', 'Starcraft: Remastered']
 
 
 @bot.command(name='create_tournament', help="Guides through creating a new tournament.")
