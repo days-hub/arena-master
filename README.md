@@ -32,6 +32,12 @@ automatically. Bo1/3/5/7, scored server-side.
 
 ![Interactive bracket](docs/screenshots/bracket.png)
 
+**The champion moment** — deciding the final crowns the winner, with the roster that
+got there. The title lands on the standings and the Discord channel hears about it in
+the same breath.
+
+![Champion celebration](docs/screenshots/champion.png)
+
 **Spectators need no account.** Brackets, standings and tournament history are
 public; signing in is only required to run something.
 
