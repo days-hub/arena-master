@@ -7,6 +7,7 @@ import {
   BoltRounded, EmojiEventsRounded, HourglassTopRounded,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import { buildChampionPath, roundOf } from '../tournamentUtils';
 import { CelebrationBurst, LiveDot } from './Motion';
 
 const CARD_WIDTH = 264;
@@ -14,8 +15,8 @@ const CARD_HEIGHT = 148;
 const ROUND_GAP = 92;
 const SLOT_HEIGHT = 184;
 const STAGE_PADDING = 28;
+const REPLAY_STEP_MS = 380;
 
-const roundOf = (match) => Number(match.tournamentRoundText || String(match.id).match(/^r(\d+)/)?.[1] || 1);
 const hasRealTeam = (participant) => participant?.name && participant.name !== 'TBD';
 const winnerOf = (match) => match.participants?.find((participant) => participant.isWinner)?.name || '';
 
@@ -35,7 +36,7 @@ const snapshotMatches = (matches) => new Map(matches.map((match) => [match.id, {
   })),
 }]));
 
-const MatchCard = ({ match, teamIcons, effects, onMatchClick, mobile = false }) => {
+const MatchCard = ({ match, teamIcons, effects, onMatchClick, mobile = false, replay = null }) => {
   const winner = winnerOf(match);
   const isDone = Boolean(winner);
   const isForfeit = match.state === 'FORFEIT';
@@ -45,11 +46,12 @@ const MatchCard = ({ match, teamIcons, effects, onMatchClick, mobile = false }) 
   const activated = effects.activeMatches.has(match.id);
 
   const stateLabel = isForfeit ? 'Forfeit' : isDone ? 'Final' : isRecordable ? 'Live' : 'Waiting';
+  const replayState = replay?.state || '';
 
   return (
     <motion.article
       layout
-      className={`arena-match-shell${resolving ? ' arena-match-shell--resolving' : ''}${activated ? ' arena-match-shell--activated' : ''}`}
+      className={`arena-match-shell${resolving ? ' arena-match-shell--resolving' : ''}${activated ? ' arena-match-shell--activated' : ''}${replayState ? ` arena-match-shell--replay-${replayState}` : ''}`}
       initial={mobile ? { opacity: 0, y: 12 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.34, ease: [0.2, 0.8, 0.2, 1] }}
@@ -82,10 +84,15 @@ const MatchCard = ({ match, teamIcons, effects, onMatchClick, mobile = false }) 
             const initials = hasRealTeam(participant)
               ? participant.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
               : '?';
+            // Hovering the champion's row in the decided Final replays their route.
+            // The handlers sit on the existing row, so no nested button is introduced.
+            const isReplayTrigger = Boolean(replay?.triggerTeam) && isWinner && participant.name === replay.triggerTeam;
             return (
               <motion.div
                 key={`${index}:${participant.name}`}
-                className={`arena-team-row${isWinner ? ' arena-team-row--winner' : ''}${isDone && !isWinner ? ' arena-team-row--loser' : ''}${arrived ? ' arena-team-row--arrival' : ''}`}
+                className={`arena-team-row${isWinner ? ' arena-team-row--winner' : ''}${isDone && !isWinner ? ' arena-team-row--loser' : ''}${arrived ? ' arena-team-row--arrival' : ''}${isReplayTrigger ? ' arena-team-row--replay-trigger' : ''}`}
+                onMouseEnter={isReplayTrigger ? replay.onEnter : undefined}
+                onMouseLeave={isReplayTrigger ? replay.onLeave : undefined}
                 initial={arrived ? { opacity: 0, x: -32 } : false}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.52, delay: arrived ? 0.35 : 0, ease: [0.18, 0.86, 0.24, 1] }}
@@ -112,9 +119,10 @@ const MatchCard = ({ match, teamIcons, effects, onMatchClick, mobile = false }) 
   );
 };
 
-const ResponsiveBracket = ({ matches, teamIcons = {}, onMatchClick, finalComplete = false }) => {
+const ResponsiveBracket = ({ matches, teamIcons = {}, onMatchClick, finalComplete = false, championName = '' }) => {
   const theme = useTheme();
   const desktop = useMediaQuery(theme.breakpoints.up('md'));
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const previousMatches = useRef(null);
   const effectTimer = useRef(null);
   const [effects, setEffects] = useState({
@@ -183,6 +191,45 @@ const ResponsiveBracket = ({ matches, teamIcons = {}, onMatchClick, finalComplet
     if (mobileRound >= rounds.length) setMobileRound(Math.max(0, rounds.length - 1));
   }, [mobileRound, rounds.length]);
 
+  // Champion path replay (desktop only, once a champion exists).
+  const championPath = useMemo(
+    () => buildChampionPath(matches, finalComplete ? championName : ''),
+    [matches, championName, finalComplete],
+  );
+  const replayAvailable = desktop && championPath.steps.length > 0;
+  // -1 means "not replaying"; otherwise it is the index of the last revealed step.
+  const [replayStep, setReplayStep] = useState(-1);
+
+  // A fresh path (new tournament, new result, or replay no longer available) always
+  // returns the bracket to its normal state rather than resuming a half-played replay.
+  useEffect(() => { setReplayStep(-1); }, [championPath, replayAvailable]);
+
+  // One timer per step, owned by the effect: React clears it whenever the step changes,
+  // the replay ends, the data changes, or the bracket unmounts, so a stale tick can
+  // never advance a replay that has already been cancelled.
+  useEffect(() => {
+    if (replayStep < 0 || replayStep >= championPath.steps.length - 1) return undefined;
+    const timer = window.setTimeout(() => setReplayStep((step) => (step < 0 ? step : step + 1)), REPLAY_STEP_MS);
+    return () => window.clearTimeout(timer);
+  }, [replayStep, championPath.steps.length]);
+
+  const startReplay = () => {
+    if (!replayAvailable) return;
+    // Reduced motion skips the sequence and reveals the whole route at once.
+    setReplayStep(reducedMotion ? championPath.steps.length - 1 : 0);
+  };
+  const stopReplay = () => setReplayStep(-1);
+
+  const replaying = replayAvailable && replayStep >= 0;
+  const replayStateFor = (type, id) => {
+    if (!replaying) return '';
+    const stepIndex = championPath.steps.findIndex((step) => step.type === type && step.id === id);
+    if (stepIndex < 0) return 'dim';
+    if (stepIndex > replayStep) return '';
+    return stepIndex === replayStep ? 'current' : 'lit';
+  };
+  const replayTriggerId = championPath.matchIds[championPath.matchIds.length - 1];
+
   const nodeById = useMemo(() => new Map(matches.map((match) => [match.id, match])), [matches]);
   const firstRoundCount = Math.max(1, rounds[0]?.matches.length || 1);
   const canvasWidth = STAGE_PADDING * 2 + rounds.length * CARD_WIDTH + Math.max(0, rounds.length - 1) * ROUND_GAP;
@@ -211,6 +258,7 @@ const ResponsiveBracket = ({ matches, teamIcons = {}, onMatchClick, finalComplet
       path: `M ${startX} ${startY} H ${elbowX} V ${endY} H ${endX}`,
       advanced,
       animating: effects.winners.has(match.id),
+      replayState: replayStateFor('connector', match.id),
     };
   });
 
@@ -253,7 +301,7 @@ const ResponsiveBracket = ({ matches, teamIcons = {}, onMatchClick, finalComplet
                     key={connector.id}
                     pathLength="1"
                     d={connector.path}
-                    className={`arena-bracket-connector${connector.advanced ? ' arena-bracket-connector--advanced' : ''}${connector.animating ? ' arena-bracket-connector--drawing' : ''}`}
+                    className={`arena-bracket-connector${connector.advanced ? ' arena-bracket-connector--advanced' : ''}${connector.animating ? ' arena-bracket-connector--drawing' : ''}${connector.replayState ? ` arena-bracket-connector--replay-${connector.replayState}` : ''}`}
                   />
                 ))}
               </Box>
@@ -261,7 +309,18 @@ const ResponsiveBracket = ({ matches, teamIcons = {}, onMatchClick, finalComplet
                 const position = positionFor(match);
                 return (
                   <Box key={match.id} className="arena-bracket-node" sx={{ width: CARD_WIDTH, left: position.x, top: position.y }}>
-                    <MatchCard match={match} teamIcons={teamIcons} effects={effects} onMatchClick={onMatchClick} />
+                    <MatchCard
+                      match={match}
+                      teamIcons={teamIcons}
+                      effects={effects}
+                      onMatchClick={onMatchClick}
+                      replay={replayAvailable ? {
+                        state: replayStateFor('match', match.id),
+                        triggerTeam: match.id === replayTriggerId ? championName : '',
+                        onEnter: startReplay,
+                        onLeave: stopReplay,
+                      } : null}
+                    />
                   </Box>
                 );
               })}

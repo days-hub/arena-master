@@ -88,8 +88,15 @@ function transformTournamentData(matchesData) {
     );
 
     const presentRounds = Object.keys(byRound).map(Number).sort((a, b) => a - b);
-    const firstRoundCount = byRound[presentRounds[0]].length;
-    const totalRounds = Math.max(1, Math.ceil(Math.log2(firstRoundCount))) + (firstRoundCount > 1 ? 1 : 0);
+    // Size the tree from the deepest round backwards: round r holds 2^(totalRounds - r)
+    // slots, so the depth has to be big enough for every round that actually exists.
+    // Deriving it from the opening round alone assumed a clean halving, which silently
+    // dropped the real final whenever the field was not a power of two (byes, uneven
+    // opening participation). For power-of-two brackets this produces the same tree.
+    const totalRounds = presentRounds.reduce(
+      (depth, round) => Math.max(depth, round + Math.ceil(Math.log2(byRound[round].length))),
+      1
+    );
     const idFor = (round, pos) => `r${round}-${pos}`;
 
     const buildParticipant = (p, fallbackId) => ({
@@ -102,7 +109,7 @@ function transformTournamentData(matchesData) {
 
     const nodes = [];
     for (let round = 1; round <= totalRounds; round += 1) {
-      const matchesInRound = Math.max(1, firstRoundCount >> (round - 1));
+      const matchesInRound = 2 ** (totalRounds - round);
       const realMatches = byRound[round] || [];
       const isFinal = round === totalRounds;
       for (let pos = 0; pos < matchesInRound; pos += 1) {
@@ -151,4 +158,84 @@ function transformTournamentData(matchesData) {
     return nodes;
   }
 
-  export { transformTournamentData, transformApiMatches };
+  // Which round a bracket node belongs to, from the round text the transform stamps on
+  // it, falling back to its synthetic `r<round>-<pos>` id.
+  const roundOf = (match) => Number(match.tournamentRoundText || String(match.id).match(/^r(\d+)/)?.[1] || 1);
+
+  // Walk the champion's route to the trophy using only bracket data: the matches the
+  // champion actually won, linked by nextMatchId, with round information used solely to
+  // anchor the end of the route. Never uses DOM geometry, and the chain itself is never
+  // derived from round arithmetic, so byes, forfeits and uneven opening rounds all fall
+  // out naturally — it simply starts wherever the champion first appears as a winner.
+  //
+  // Returns the matches in chronological order, the ids of the connectors between them
+  // (keyed by their source match, the way the bracket renders edges) and a flat list of
+  // reveal steps that alternates match → connector → match for the replay animation.
+  function buildChampionPath(matches, championName) {
+    const empty = { matchIds: [], connectorIds: [], steps: [] };
+    if (!championName || !Array.isArray(matches) || matches.length === 0) return empty;
+
+    const wonByChampion = new Map();
+    const feedsInto = new Map();
+    matches.forEach((match) => {
+      if (!match) return;
+      const won = (match.participants || []).some(
+        (participant) => participant && participant.isWinner && participant.name === championName
+      );
+      if (won) wonByChampion.set(match.id, match);
+      if (match.nextMatchId == null) return;
+      if (!feedsInto.has(match.nextMatchId)) feedsInto.set(match.nextMatchId, []);
+      feedsInto.get(match.nextMatchId).push(match);
+    });
+    if (wonByChampion.size === 0) return empty;
+
+    // The route ends at the champion win that does not advance into another champion win.
+    const deciders = [...wonByChampion.values()].filter(
+      (match) => match.nextMatchId == null || !wonByChampion.has(match.nextMatchId)
+    );
+    if (deciders.length === 0) return empty;
+
+    const walkBack = (decider) => {
+      const chain = [];
+      const seen = new Set();
+      let current = decider;
+      while (current && !seen.has(current.id)) {
+        seen.add(current.id);
+        chain.unshift(current);
+        // A team can only ever win one of the two feeder matches, so more than one
+        // candidate means the data is inconsistent — stop rather than guess.
+        const feeders = (feedsInto.get(current.id) || [])
+          .filter((match) => wonByChampion.has(match.id) && !seen.has(match.id));
+        current = feeders.length === 1 ? feeders[0] : null;
+      }
+      return chain;
+    };
+
+    // The route has to end on the champion's last match, so rank candidates by round
+    // first: a broken nextMatchId elsewhere in the bracket can otherwise leave a longer
+    // early fragment looking more authoritative than the real final. Chain length only
+    // breaks ties within the same round.
+    const best = deciders
+      .map((decider) => ({ round: roundOf(decider), chain: walkBack(decider) }))
+      .reduce((leader, candidate) => {
+        if (!leader) return candidate;
+        if (candidate.round !== leader.round) return candidate.round > leader.round ? candidate : leader;
+        return candidate.chain.length > leader.chain.length ? candidate : leader;
+      }, null);
+    const chain = best ? best.chain : [];
+    if (chain.length === 0) return empty;
+
+    const steps = [];
+    chain.forEach((match, index) => {
+      steps.push({ type: 'match', id: match.id });
+      if (index < chain.length - 1) steps.push({ type: 'connector', id: match.id });
+    });
+
+    return {
+      matchIds: chain.map((match) => match.id),
+      connectorIds: chain.slice(0, -1).map((match) => match.id),
+      steps,
+    };
+  }
+
+  export { transformTournamentData, transformApiMatches, buildChampionPath, roundOf };

@@ -245,6 +245,7 @@ const TournamentBracket = () => {
             teamIcons={teamIcons}
             onMatchClick={handleMatchClick}
             finalComplete={finalComplete}
+            championName={championName}
           />
         )}
       </Box>

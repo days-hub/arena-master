@@ -538,6 +538,32 @@ textarea {
   filter: drop-shadow(0 0 5px rgba(241,173,47,.48));
 }
 
+.arena-bracket-connector--replay-dim {
+  stroke: #dfe7e6;
+  opacity: .38;
+  filter: none;
+}
+
+.arena-bracket-connector--replay-lit {
+  stroke: #18a29e;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(24,162,158,.45));
+}
+
+.arena-bracket-connector--replay-current {
+  stroke: #f1ad2f;
+  stroke-width: 3;
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(241,173,47,.55));
+}
+
+/* Only drive the reveal draw when the connector is not already drawing itself, so a
+   freshly advanced winner keeps its own longer animation instead of being cut short. */
+.arena-bracket-connector--replay-current:not(.arena-bracket-connector--drawing) {
+  stroke-dasharray: 1;
+  animation: arena-connector-draw 420ms cubic-bezier(.22,.75,.2,1) both;
+}
+
 .arena-bracket-node {
   position: absolute;
   z-index: 1;
@@ -559,7 +585,7 @@ textarea {
   border-radius: 16px !important;
   background: rgba(255,255,255,.96) !important;
   box-shadow: 0 10px 25px rgba(19,52,60,.075) !important;
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease !important;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, opacity 260ms ease, filter 260ms ease !important;
 }
 
 .arena-match-card--live {
@@ -719,6 +745,33 @@ textarea {
   animation: arena-match-activate 1050ms cubic-bezier(.2,.8,.2,1) both;
 }
 
+.arena-team-row--replay-trigger {
+  cursor: help;
+}
+
+.arena-match-shell--replay-dim .arena-match-card {
+  opacity: .3;
+  filter: saturate(.5);
+}
+
+.arena-match-shell--replay-lit .arena-match-card {
+  border-color: rgba(11,143,140,.5) !important;
+  box-shadow: 0 0 0 2px rgba(75,195,190,.18), 0 14px 32px rgba(11,143,140,.16) !important;
+}
+
+/* The base card shadow is !important, which an animated shadow could never beat, so the
+   resting glow is declared here and the keyframes only carry the reveal movement. */
+.arena-match-shell--replay-current .arena-match-card {
+  border-color: rgba(241,173,47,.72) !important;
+  box-shadow: 0 0 0 3px rgba(241,173,47,.26), 0 18px 38px rgba(241,173,47,.24) !important;
+}
+
+/* Let an in-flight winner-lock or activation animation finish rather than replacing it;
+   the reveal only animates a card that is not already running its own effect. */
+.arena-match-shell--replay-current:not(.arena-match-shell--resolving):not(.arena-match-shell--activated) .arena-match-card {
+  animation: arena-replay-reveal 520ms cubic-bezier(.2,.8,.2,1) both;
+}
+
 .arena-bracket-footer {
   position: relative;
   z-index: 2;
@@ -763,6 +816,12 @@ textarea {
 @keyframes arena-match-activate {
   0%, 100% { box-shadow: 0 10px 25px rgba(19,52,60,.075); }
   40% { box-shadow: 0 0 0 5px rgba(75,195,190,.14), 0 18px 38px rgba(11,143,140,.19); }
+}
+
+@keyframes arena-replay-reveal {
+  0% { transform: scale(.975); }
+  45% { transform: scale(1.035); }
+  100% { transform: scale(1); }
 }
 
 @keyframes arena-score-pop {
